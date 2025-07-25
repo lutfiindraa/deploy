@@ -1,0 +1,9 @@
+# File: requirements.txt
+
+streamlit
+pandas
+plotly
+firebase-admin
+pycryptodome
+scikit-learn
+requests
