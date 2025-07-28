@@ -1,3 +1,24 @@
+# Core UI and data handling
 streamlit
 pandas
+numpy
+
+# Plotting & visualization
 plotly
+pydeck
+
+# Geo-spatial processing
+geopandas
+shapely
+
+# Machine Learning & Time Series
+scikit-learn
+xgboost
+prophet
+statsmodels
+
+# Spatial statistics
+pysal
+
+# File & data handling
+openpyxl
