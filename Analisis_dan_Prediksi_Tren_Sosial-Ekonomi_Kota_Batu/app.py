@@ -81,36 +81,88 @@ st.markdown("""
 # ======================================================================================
 # 3. PEMUATAN DATA & CACHING
 # ======================================================================================
+# Mendefinisikan DEFAULT_FILE_PATH di sini agar bisa diakses load_data
+DEFAULT_FILE_PATH = 'Analisis_dan_Prediksi_Tren_Sosial-Ekonomi_Kota_Batu/Data Strategis Kota Batu 2010-2024.xlsx'
+
 @st.cache_data
 def load_data(source):
-    """Memuat dan membersihkan data dari file Excel, baik dari path lokal maupun file yang diunggah."""
+    """Memuat dan membersihkan data dari file Excel/CSV, baik dari path lokal maupun file yang diunggah."""
+    data = None
+    
+    if hasattr(source, 'name'):
+        file_name = source.name
+    else:
+        file_name = source
+
+    file_extension = os.path.splitext(file_name)[1].lower()
+
     try:
-        data = pd.read_excel(source, sheet_name='Sheet1', skiprows=3, engine='openpyxl')
+        if file_extension == '.xlsx':
+            data = pd.read_excel(source, sheet_name='Sheet1', skiprows=3, engine='openpyxl')
+            # Pesan debug dihapus dari sini
+        elif file_extension == '.csv':
+            data = pd.read_csv(source, encoding='utf-8', sep=',', header=0)
+            # Pesan debug dihapus dari sini
+        else:
+            st.error(f"Format file '{file_extension}' tidak didukung. Mohon unggah file .xlsx atau .csv.")
+            return None
+
     except Exception as e:
-        st.error(f"Gagal membaca file Excel: {e}. Pastikan format file benar dan 'openpyxl' terinstal.")
+        st.error(f"Gagal membaca file: {e}. Pastikan format file sesuai dengan template.")
         return None
 
-    indicator_col_name = next((col for col in data.columns if 'INDIKATOR' in str(col).upper() or 'RINCIAN' in str(col).upper()), None)
+    # --- Common processing steps ---
+    data.columns = [str(col).strip().replace('\n', '') for col in data.columns]
+
+    indicator_col_name = None
+    for col in data.columns:
+        if 'INDIKATOR' == col.upper() or 'RINCIAN' == col.upper():
+            indicator_col_name = col
+            break
+    
+    if not indicator_col_name:
+        for col in data.columns:
+            if 'TAHUN' == col.upper():
+                if not data[col].dropna().apply(lambda x: str(x).isdigit() and len(str(x)) == 4).all():
+                    indicator_col_name = col
+                    break
 
     if not indicator_col_name:
-        st.error("Gagal menemukan kolom 'INDIKATOR' atau 'Rincian' di file Excel.")
+        st.error("Gagal menemukan kolom 'INDIKATOR' di baris header. Pastikan format file Anda sesuai dengan template yang disediakan.")
         return None
 
     data = data.rename(columns={indicator_col_name: 'Indikator'})
-    data.columns = [str(col).strip().replace('\n', '').replace(' ', '_') for col in data.columns]
-    data = data.rename(columns={'Indikator_': 'Indikator'})
+    
+    data.columns = [col.replace(' ', '_') for col in data.columns]
+    
+    if 'Indikator_' in data.columns:
+        data = data.rename(columns={'Indikator_': 'Indikator'})
 
     if 'No_' in data.columns:
         data = data.drop(columns=['No_'])
+    
+    if 'TAHUN' in data.columns and data.columns[0] != 'Indikator' and data.columns[1] != 'Indikator':
+        data = data.drop(columns=['TAHUN'])
+
 
     data.dropna(subset=['Indikator'], inplace=True)
     data['Indikator'] = data['Indikator'].str.strip()
 
     year_columns = [col for col in data.columns if col.isdigit()]
+    
+    if not year_columns:
+        st.error("Tidak ada kolom tahun yang terdeteksi. Pastikan nama kolom tahun berupa angka (misal: 2020, 2021) di baris header.")
+        return None
+
     for col in year_columns:
         data[col] = pd.to_numeric(data[col], errors='coerce')
 
-    data_transposed = data.set_index('Indikator')[year_columns].transpose()
+    valid_year_columns = [col for col in year_columns if col in data.columns]
+    if not valid_year_columns:
+        st.error("Kolom tahun yang valid tidak ditemukan setelah pemrosesan.")
+        return None
+
+    data_transposed = data.set_index('Indikator')[valid_year_columns].transpose()
     data_transposed = data_transposed.interpolate(method='linear', limit_direction='both')
 
     return data_transposed.transpose()
@@ -135,6 +187,23 @@ with st.sidebar:
         help="Unggah file Excel dengan format yang sama untuk memperbarui data analisis."
     )
 
+    with st.container(border=True):
+        st.markdown("<p style='text-align: center; font-weight: bold;'>Actual Dataset Source</p>", unsafe_allow_html=True)
+        try:
+            if os.path.exists(DEFAULT_FILE_PATH):
+                with open(DEFAULT_FILE_PATH, "rb") as file:
+                    st.download_button(
+                        label="📥 Download (.xlsx)",
+                        data=file,
+                        file_name='Data Strategis Kota Batu 2010-2024.xlsx',
+                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        use_container_width=True
+                    )
+            else:
+                 st.info("File template default tidak ditemukan.", icon="ℹ️")
+        except Exception as e:
+            st.error("Gagal memuat template.", icon="🚨")
+
     available_models = ['Prophet', 'Gradient Boosting', 'Random Forest', 'Linear Regression', 'Holt-Winters', 'ARIMA']
     selected_models = st.multiselect(
         "Pilih Model untuk Ditampilkan:",
@@ -143,8 +212,6 @@ with st.sidebar:
     )
 
 data_source = None
-DEFAULT_FILE_PATH = 'Analisis_dan_Prediksi_Tren_Sosial-Ekonomi_Kota_Batu/Data Strategis Kota Batu 2010-2024.xlsx'
-
 if uploaded_file is not None:
     data_source = uploaded_file
 elif os.path.exists(DEFAULT_FILE_PATH):
@@ -324,8 +391,8 @@ def display_analysis_view(indicator_name, y_label):
                 metrics_df_filtered = metrics_df.loc[metrics_df.index.intersection(selected_models)]
                 if not metrics_df_filtered.empty:
                     st.dataframe(metrics_df_filtered.style.format({'MAE': '{:,.2f}', 'RMSE': '{:,.2f}', 'MAPE (%)': '{:.2f}%', 'R-squared': '{:.4f}'}, na_rep="-")
-                                 .highlight_min(subset=['MAE', 'RMSE', 'MAPE (%)'], color="#C9C5DD", axis=0)
-                                 .highlight_max(subset=['R-squared'], color="#C9C5DD", axis=0), use_container_width=True)
+                                    .highlight_min(subset=['MAE', 'RMSE', 'MAPE (%)'], color="#C9C5DD", axis=0)
+                                    .highlight_max(subset=['R-squared'], color="#C9C5DD", axis=0), use_container_width=True)
         else:
             st.warning("Pilih minimal satu model untuk melihat metrik evaluasinya.")
 
@@ -363,38 +430,44 @@ if page == '🏠 Beranda':
         st.markdown("<h4>Langkah 2: Mengunggah Data Baru (Opsional)</h4>", unsafe_allow_html=True)
         st.write(
             "Anda dapat menganalisis data terbaru dengan mengunggah file Excel Anda sendiri. "
-            "Gunakan tombol **'Unggah file data baru (.xlsx)'** di sidebar."
+            "Gunakan tombol **'Unggah file data baru (.xlsx)'** di sidebar. Anda juga dapat mengunduh template format yang benar terlebih dahulu."
         )
+        
         st.info(
-            "**Penting:** Pastikan file yang Anda unggah memiliki format yang sama dengan data asli agar dapat dibaca oleh sistem.",
+            "**Penting:** Semua file Excel yang diunggah harus memiliki format yang sama dengan template, di mana header tabel berada di baris ke-4.",
             icon="💡"
         )
 
-        st.markdown("<h5>Format File Excel yang Benar:</h5>", unsafe_allow_html=True)
+        st.markdown("<h5>Format File Excel yang Benar (Sesuai Template):</h5>", unsafe_allow_html=True)
         st.markdown("""
         1.  **Nama Sheet**: Data harus berada di dalam sheet bernama `Sheet1`.
-        2.  **Posisi Header**: Header tabel (misalnya: INDIKATOR, 2021, 2022, dst.) harus berada di **baris ke-4**. Tiga baris pertama akan diabaikan.
-        3.  **Kolom Indikator**: Kolom pertama harus berisi nama-nama indikator.
-        4.  **Kolom Tahun**: Kolom-kolom berikutnya harus berisi data tahunan.
+        2.  **Posisi Header**: Judul kolom (misalnya: No, INDIKATOR, 2010, dst.) harus berada di **baris ke-4**. Tiga baris pertama bisa dikosongkan atau berisi judul/catatan lain.
+        3.  **Kolom Indikator**: Pastikan ada kolom dengan judul `INDIKATOR`.
+        4.  **Kolom Tahun**: Kolom-kolom berikutnya harus berisi data tahunan dengan judul berupa angka tahun (misal: `2010`, `2011`, dst.).
 
         **Contoh Struktur di Excel:**
         """)
-        # Membuat dataframe contoh untuk ditampilkan
+        
         contoh_data = {
-            ' ': ['4', '5', '6'],
-            'INDIKATOR': ['PDRB Atas Dasar Harga Berlaku (Miliar Rp)', 'Indeks Pembangunan Manusia (IPM)', 'Persentase Penduduk Miskin (%)'],
-            '2022': [15200.7, 78.10, 3.95],
-            '2023': [16100.2, 78.65, 3.80],
-            '2024': [17050.0, 79.20, 3.75]
+            'No': [1, 2, 3, 4],
+            'INDIKATOR': [
+                'PDRB Atas Dasar Harga Berlaku (Miliar Rp)',
+                'Indeks Pembangunan Manusia (IPM)',
+                'Persentase Penduduk Miskin (%)',
+                '...'
+            ],
+            '2021': [14931.71, 77.31, 4.33, '...'],
+            '2022': [15786.87, 78.28, 4.08, '...'],
+            '2023': [16482.52, 78.51, 3.84, '...'],
+            '2024': [16482.52, 79.11, 3.40, '...']
         }
-        df_contoh = pd.DataFrame(contoh_data).set_index(' ')
-        st.table(df_contoh)
-
+        df_contoh = pd.DataFrame(contoh_data)
+        st.dataframe(df_contoh, hide_index=True, use_container_width=True)
 
         st.markdown("<h4>Langkah 3: Interaksi dengan Grafik</h4>", unsafe_allow_html=True)
         st.write(
-            "Pada halaman analisis (misalnya PDRB atau TPT), Anda dapat memilih sub-indikator yang berbeda melalui **menu dropdown** yang tersedia. "
-            "Grafik, tabel, dan metrik akan otomatis diperbarui sesuai pilihan Anda."
+            "Pada halaman analisis (misalnya PDRB), Anda dapat memilih sub-indikator yang berbeda melalui **menu dropdown** atau memilih model prediksi yang ingin dibandingkan di sidebar. "
+            "Grafik dan tabel akan otomatis diperbarui."
         )
 
 elif page == '💰 PDRB':

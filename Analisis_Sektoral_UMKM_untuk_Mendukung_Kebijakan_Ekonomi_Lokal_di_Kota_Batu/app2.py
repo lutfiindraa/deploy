@@ -18,7 +18,7 @@ from io import BytesIO
 # =============================================================================
 st.set_page_config(
     page_title="Dashboard Analitik & Prediktif UMKM Kota Batu",
-    page_icon="",
+    page_icon="🏢",
     layout="wide"
 )
 
@@ -125,7 +125,8 @@ st.markdown(
         font-weight: bold;
     }
 
-    /* St.metric styling */
+    /* === PERBAIKAN AKHIR UNTUK st.metric FONT SIZE === */
+    /* Target kontainer utama st.metric */
     div[data-testid="stMetric"] {
         background-color: #ffffff; /* Putih */
         border: 1px solid #dee2e6; /* Border abu-abu */
@@ -139,20 +140,32 @@ st.markdown(
     div[data-testid="stMetric"]:hover {
         transform: translateY(-3px);
     }
-    div[data-testid="stMetric"] > label {
+
+    /* MENINGKATKAN UKURAN FONT UNTUK LABEL METRIK (Judul: "Total UMKM Terfilter", "Sektor Usaha Teratas") */
+    div[data-testid="stMetricLabel"] {
         color: #0056b3; /* Biru tua untuk judul metrik */
         font-weight: bold;
-        font-size: 1.1em;
+        font-size: 2.5em !important; /* UKURAN SANGAT BESAR untuk label, diperbesar lagi */
+        line-height: 1.2em !important; /* Sesuaikan tinggi baris */
+        padding-bottom: 0.1em !important; /* Sedikit spasi di bawah label */
     }
-    div[data-testid="stMetric"] > div {
+
+    /* MENGATUR UKURAN FONT UNTUK NILAI UTAMA METRIK (Angka: "32,649"; Teks: "Perdagangan Besar dan Eceran") */
+    div[data-testid="stMetricValue"] {
         color: #007bff; /* Biru cerah untuk nilai metrik */
-        font-size: 2.0em;
+        font-size: 1.6em !important; /* UKURAN MEDIUM untuk nilai utama, LEBIH KECIL dari label, dengan !important */
+        line-height: 1.2em !important; /* Sesuaikan tinggi baris */
         font-weight: bold;
     }
-    div[data-testid="stMetric"] > div > div {
-        color: #495057; /* Warna untuk sub-nilai metrik (jika ada) */
-        font-size: 0.9em;
+
+    /* MENGATUR UKURAN FONT UNTUK DELTA / SUB-NILAI METRIK (misal: "13,991 UMKM" pada Sektor Teratas) */
+    div[data-testid="stMetricDelta"] {
+        color: #495057; /* Warna abu-abu untuk sub-nilai */
+        font-size: 1.0em !important; /* UKURAN KECIL untuk sub-nilai, dengan !important */
+        margin-top: 0.2em !important; /* Sedikit spasi di atas delta */
     }
+    /* Akhir dari perbaikan st.metric */
+
 
     /* Tabs Styling */
     .stTabs [data-baseweb="tab-list"] {
@@ -246,12 +259,11 @@ st.markdown(
         height: 100%;
     }
     </style>
-    """, unsafe_allow_html=True
-)
+""", unsafe_allow_html=True)
 
 st.title("Dashboard Analitik & Prediktif UMKM Kota Batu")
 st.markdown(
-    "<h2 style='text-align: center;'>Analisis Deskriptif, Spasial</h2>",
+    "<h2 style='text-align: center;'>Analisis Deskriptif, Spasial, dan Prediktif Lokasi UMKM</h2>",
     unsafe_allow_html=True
 )
 
@@ -314,113 +326,131 @@ def get_dominant_value(umkm_in_area, column_name):
     if umkm_in_area.empty or umkm_in_area[column_name].value_counts().empty: return "N/A"
     return umkm_in_area[column_name].value_counts().index[0]
 
-# Fungsi ini tidak lagi di-cache karena data akan diambil dari session_state
 def load_and_process_initial_data(umkm_file_path, geojson_path_desa, geojson_path_kecamatan, _poi_data):
     try:
-        cols_to_use = ['namausaha', 'kegiatan', 'latitude', 'longitude', 'nama_sektor']
-        df_umkm = pd.read_csv(umkm_file_path, usecols=lambda c: c in cols_to_use)
-        gdf_desa = gpd.read_file(geojson_path_desa)
-        gdf_kecamatan = gpd.read_file(geojson_path_kecamatan)
+        with st.spinner("Memuat data UMKM dan GeoJSON..."):
+            cols_to_use = ['namausaha', 'kegiatan', 'latitude', 'longitude', 'nama_sektor', 'kec', 'desa'] 
+            if umkm_file_path.endswith('.csv'):
+                df_umkm = pd.read_csv(umkm_file_path, usecols=lambda c: c in cols_to_use)
+            elif umkm_file_path.endswith('.xlsx'):
+                df_umkm = pd.read_excel(umkm_file_path, usecols=lambda c: c in cols_to_use)
+            else:
+                st.error("Format file UMKM default tidak didukung. Harap gunakan .csv atau .xlsx.")
+                return None
+            
+            gdf_desa = gpd.read_file(geojson_path_desa)
+            gdf_kecamatan = gpd.read_file(geojson_kecamatan_path)
+        
     except (FileNotFoundError, ValueError) as e:
-        st.error(f"Error memuat data: {e}"); return None
+        st.error(f"Error memuat data: {e}. Pastikan file UMKM default dan GeoJSON ada di direktori yang benar.")
+        return None
 
     df_umkm.dropna(subset=['latitude', 'longitude'], inplace=True)
     gdf_umkm = gpd.GeoDataFrame(df_umkm, geometry=gpd.points_from_xy(df_umkm.longitude, df_umkm.latitude), crs="EPSG:4326")
 
-    # Spatial Joins untuk mendapatkan nama wilayah akurat
-    gdf_umkm = gpd.sjoin(gdf_umkm, gdf_desa[['nm_kelurahan', 'geometry']], how="left", predicate='within').drop(columns=['index_right'])
-    gdf_umkm = gpd.sjoin(gdf_umkm, gdf_kecamatan[['nm_kecamatan', 'geometry']], how="left", predicate='within').drop(columns=['index_right'])
+    with st.spinner("Melakukan spatial join (pemetaan desa/kecamatan)..."):
+        gdf_umkm = gpd.sjoin(gdf_umkm, gdf_desa[['nm_kelurahan', 'geometry']], how="left", predicate='within').drop(columns=['index_right'])
+        gdf_umkm = gpd.sjoin(gdf_umkm, gdf_kecamatan[['nm_kecamatan', 'geometry']], how="left", predicate='within').drop(columns=['index_right'])
     
-    # Pembersihan dan pemetaan nama
     gdf_umkm['nama_desa_akurat'] = gdf_umkm['nm_kelurahan'].str.title().fillna('Tidak Terpetakan')
     gdf_umkm['nama_kecamatan_akurat'] = gdf_umkm['nm_kecamatan'].str.title().fillna('Tidak Terpetakan')
+    
     gdf_umkm['kecamatan_display'] = gdf_umkm['nama_kecamatan_akurat'].map(KECAMATAN_MAP).fillna(gdf_umkm['nama_kecamatan_akurat'])
     gdf_umkm['desa_display'] = gdf_umkm['nama_desa_akurat'].map(DESA_MAP).fillna(gdf_umkm['nama_desa_akurat'])
 
-    # === ANALISIS PROKSIMITAS ===
-    # Buat GeoDataFrame untuk POI
-    gdf_poi = gpd.GeoDataFrame(geometry=[v for k, v in _poi_data.items()], crs="EPSG:4326")
-    # Ubah CRS ke sistem terproyeksi (meter) untuk perhitungan jarak yang akurat
-    gdf_umkm_proj = gdf_umkm.to_crs("EPSG:32749")
-    gdf_poi_proj = gdf_poi.to_crs("EPSG:32749")
-    
-    # Hitung jarak ke POI terdekat untuk setiap UMKM
-    for i, umkm_point in gdf_umkm_proj.iterrows():
-        distances = gdf_poi_proj.distance(umkm_point.geometry)
-        gdf_umkm.loc[i, 'jarak_ke_poi_terdekat_m'] = distances.min()
+    with st.spinner("Menghitung jarak UMKM ke POI terdekat... (Ini mungkin membutuhkan waktu)"):
+        gdf_poi = gpd.GeoDataFrame(geometry=[v for k, v in _poi_data.items()], crs="EPSG:4326")
+        gdf_umkm_proj = gdf_umkm.to_crs("EPSG:32749")
+        gdf_poi_proj = gdf_poi.to_crs("EPSG:32749")
+        
+        gdf_umkm['jarak_ke_poi_terdekat_m'] = gdf_umkm_proj.geometry.apply(
+            lambda umkm_point: gdf_poi_proj.distance(umkm_point).min()
+        )
 
-    return gdf_umkm.drop(columns=['nm_kelurahan', 'nm_kecamatan'])
+    return gdf_umkm.drop(columns=['nm_kelurahan', 'nm_kecamatan', 'kec', 'desa'], errors='ignore')
 
 @st.cache_data
 def calculate_hotspots(_gdf_desa, _df_umkm):
-    gdf_desa_copy = _gdf_desa.copy()
-    umkm_per_desa = _df_umkm.groupby('nama_desa_akurat').size().reset_index(name='jumlah_umkm')
-    
-    # Gabungkan jumlah UMKM ke GeoDataFrame desa
-    gdf_desa_stats = gdf_desa_copy.merge(umkm_per_desa, left_on='nm_kelurahan', right_on='nama_desa_akurat', how='left')
-    gdf_desa_stats['jumlah_umkm'].fillna(0, inplace=True)
-    
-    # Hitung bobot spasial (spatial weights)
-    w = weights.Queen.from_dataframe(gdf_desa_stats)
-    w.transform = 'r' # Standardisasi baris
-    
-    # Lakukan analisis Getis-Ord Gi*
-    g_local = esda.G_Local(gdf_desa_stats['jumlah_umkm'], w)
-    
-    # Klasifikasi hotspot/coldspot
-    gdf_desa_stats['hotspot_label'] = 'Tidak Signifikan'
-    gdf_desa_stats.loc[(g_local.Zs > 1.96) & (g_local.p_sim < 0.05), 'hotspot_label'] = 'Hotspot (Sentra Bisnis)'
-    gdf_desa_stats.loc[(g_local.Zs < -1.96) & (g_local.p_sim < 0.05), 'hotspot_label'] = 'Coldspot (Area Sepi)'
-    
-    return gdf_desa_stats
+    with st.spinner("Memproses Analisis Hotspot dan Coldspot..."):
+        gdf_desa_copy = _gdf_desa.copy()
+        gdf_desa_copy['nm_kelurahan'] = gdf_desa_copy['nm_kelurahan'].str.title()
+
+        umkm_per_desa = _df_umkm.groupby('nama_desa_akurat').size().reset_index(name='jumlah_umkm')
+        
+        gdf_desa_stats = gdf_desa_copy.merge(umkm_per_desa, left_on='nm_kelurahan', right_on='nama_desa_akurat', how='left')
+        gdf_desa_stats['jumlah_umkm'] = gdf_desa_stats['jumlah_umkm'].astype(float).fillna(0.0) 
+
+        try:
+            w = weights.Queen.from_dataframe(gdf_desa_stats)
+            if w.islands:
+                st.warning("Peringatan: Beberapa desa terputus dari jaringan spasial (tidak memiliki tetangga). Analisis hotspot mungkin tidak akurat untuk area tersebut.")
+        except ValueError as e:
+            st.error(f"Kesalahan dalam menghitung bobot spasial: {e}. Pastikan file GeoJSON memiliki konektivitas spasial yang memadai antar poligon.")
+            return gdf_desa_stats.assign(hotspot_label='Tidak Signifikan')
+
+        w.transform = 'r' 
+
+        if len(gdf_desa_stats) > 1 and gdf_desa_stats['jumlah_umkm'].nunique() > 1:
+            g_local = esda.G_Local(gdf_desa_stats['jumlah_umkm'], w)
+            
+            gdf_desa_stats['hotspot_label'] = 'Tidak Signifikan'
+            gdf_desa_stats.loc[(g_local.Zs > 1.96) & (g_local.p_sim < 0.05), 'hotspot_label'] = 'Hotspot (Sentra Bisnis)'
+            gdf_desa_stats.loc[(g_local.Zs < -1.96) & (g_local.p_sim < 0.05), 'hotspot_label'] = 'Coldspot (Area Sepi)'
+        else:
+            st.info("Tidak cukup variasi data UMKM per desa untuk melakukan analisis hotspot/coldspot yang signifikan.")
+            gdf_desa_stats['hotspot_label'] = 'Tidak Signifikan'
+        
+        return gdf_desa_stats
 
 @st.cache_resource
 def train_suitability_model(_df, sector):
     df_sector = _df[_df['nama_sektor'] == sector].copy()
-    if len(df_sector) < 10: return None # Butuh data yang cukup
+    if len(df_sector) < 10: return None
 
-    # Membuat 'skor sukses' simulasi
-    df_sector['success_score'] = 1 / (df_sector['jarak_ke_poi_terdekat_m'] + 1)
-    df_sector['success_score'] = (df_sector['success_score'] - df_sector['success_score'].min()) / \
-                                 (df_sector['success_score'].max() - df_sector['success_score'].min())
-    
-    X = df_sector[['latitude', 'longitude', 'jarak_ke_poi_terdekat_m']]
-    y = df_sector['success_score']
-    
-    model = RandomForestRegressor(n_estimators=100, random_state=42, min_samples_leaf=2)
-    model.fit(X, y)
-    return model
+    with st.spinner(f"Melatih model AI untuk sektor '{sector}'..."):
+        df_sector['success_score'] = 1 / (df_sector['jarak_ke_poi_terdekat_m'] + 1)
+        min_score = df_sector['success_score'].min()
+        max_score = df_sector['success_score'].max()
+        if max_score > min_score:
+            df_sector['success_score'] = (df_sector['success_score'] - min_score) / (max_score - min_score)
+        else:
+            df_sector['success_score'] = 0.5
+        
+        X = df_sector[['latitude', 'longitude', 'jarak_ke_poi_terdekat_m']]
+        y = df_sector['success_score']
+        
+        model = RandomForestRegressor(n_estimators=100, random_state=42, min_samples_leaf=2)
+        model.fit(X, y)
+        return model
 
 @st.cache_data
 def create_prediction_grid(bounds, _poi_data, grid_size=75):
-    # Buat grid koordinat
-    lon_min, lat_min, lon_max, lat_max = bounds
-    lons = np.linspace(lon_min, lon_max, grid_size)
-    lats = np.linspace(lat_min, lat_max, grid_size)
-    grid_lons, grid_lats = np.meshgrid(lons, lats)
-    
-    grid_df = pd.DataFrame({'longitude': grid_lons.ravel(), 'latitude': grid_lats.ravel()})
-    gdf_grid = gpd.GeoDataFrame(grid_df, geometry=gpd.points_from_xy(grid_df.longitude, grid_df.latitude), crs="EPSG:4326")
-
-    # Hitung fitur jarak untuk setiap titik di grid
-    gdf_poi = gpd.GeoDataFrame(geometry=[v for k, v in _poi_data.items()], crs="EPSG:4326")
-    gdf_grid_proj = gdf_grid.to_crs("EPSG:32749")
-    gdf_poi_proj = gdf_poi.to_crs("EPSG:32749")
-
-    for i, point in gdf_grid_proj.iterrows():
-        distances = gdf_poi_proj.distance(point.geometry)
-        gdf_grid.loc[i, 'jarak_ke_poi_terdekat_m'] = distances.min()
+    with st.spinner("Membuat grid prediksi..."):
+        lon_min, lat_min, lon_max, lat_max = bounds
+        lons = np.linspace(lon_min, lon_max, grid_size)
+        lats = np.linspace(lat_min, lat_max, grid_size)
+        grid_lons, grid_lats = np.meshgrid(lons, lats)
         
-    return gdf_grid
+        grid_df = pd.DataFrame({'longitude': grid_lons.ravel(), 'latitude': grid_lats.ravel()})
+        gdf_grid = gpd.GeoDataFrame(grid_df, geometry=gpd.points_from_xy(grid_df.longitude, grid_df.latitude), crs="EPSG:4326")
+
+        gdf_poi = gpd.GeoDataFrame(geometry=[v for k, v in _poi_data.items()], crs="EPSG:4326")
+        gdf_grid_proj = gdf_grid.to_crs("EPSG:32749")
+        gdf_poi_proj = gdf_poi.to_crs("EPSG:32749")
+
+        gdf_grid['jarak_ke_poi_terdekat_m'] = gdf_grid_proj.geometry.apply(
+            lambda point: gdf_poi_proj.distance(point).min()
+        )
+            
+        return gdf_grid
 
 def calculate_area_statistics(df_filtered, geojson_data, boundary_level):
     if not geojson_data or df_filtered.empty: return geojson_data
-    result_geojson = json.loads(json.dumps(geojson_data))  # Deep copy
+    result_geojson = json.loads(json.dumps(geojson_data))
     area_prop_map = {'Kecamatan': 'nm_kecamatan', 'Kelurahan/Desa': 'nm_kelurahan', 'Kota': 'nm_dati2'}
     geojson_key = area_prop_map.get(boundary_level, 'nm_kelurahan')
     
-    df_filtered['geometry'] = [Point(xy) for xy in zip(df_filtered['longitude'], df_filtered['latitude'])]
-    gdf_filtered = gpd.GeoDataFrame(df_filtered, geometry='geometry', crs="EPSG:4326")
+    gdf_filtered = gpd.GeoDataFrame(df_filtered, geometry=gpd.points_from_xy(df_filtered.longitude, df_filtered.latitude), crs="EPSG:4326")
 
     for feature in result_geojson['features']:
         polygon = shape(feature['geometry'])
@@ -441,109 +471,21 @@ def calculate_area_statistics(df_filtered, geojson_data, boundary_level):
             nama_wilayah = "Kota Batu"
 
         tooltip_html = f"""<div style='max-width:300px; background:rgba(0,0,0,0.8); color:white; padding:10px; border-radius:5px;'>
-                           <div style='font-size:1.1em; font-weight:bold; margin-bottom:8px;'>🗺️ Wilayah: {nama_wilayah}</div>
-                           <div style='margin-bottom:4px;'><span style='color:#FCD34D;'>📊 Jumlah UMKM:</span> <b>{jumlah_umkm}</b></div>
-                           <div style='margin-bottom:4px;'><span style='color:#F87171;'>🛍️ Sektor Dominan:</span> <b>{sektor_dominan}</b></div>
-                           </div>"""
+                                <div style='font-size:1.1em; font-weight:bold; margin-bottom:8px;'>🗺️ Wilayah: {nama_wilayah}</div>
+                                <div style='margin-bottom:4px;'><span style='color:#FCD34D;'>📊 Jumlah UMKM:</span> <b>{jumlah_umkm}</b></div>
+                                <div style='margin-bottom:4px;'><span style='color:#F87171;'>🛍️ Sektor Dominan:</span> <b>{sektor_dominan}</b></div>
+                                </div>"""
         feature['properties']['tooltip_html'] = tooltip_html
         
     return result_geojson
 
-# Untuk mengizinkan unduhan gambar PyDeck
-# Ini adalah hack karena Streamlit tidak memiliki fungsi bawaan untuk unduhan gambar kanvas
-# Ini akan menyuntikkan HTML dengan JavaScript yang memicu unduhan di browser klien.
-# Ganti fungsi get_pydeck_download_script yang lama dengan yang ini:
-
 def get_pydeck_download_script(filename="pydeck_map.png"):
-    script = f"""
-    <script>
-    // Pastikan fungsi ini hanya didefinisikan sekali
-    if (!window.downloadPydeckMap) {{
-        window.downloadPydeckMap = function() {{
-            // Coba berbagai selector untuk menemukan canvas PyDeck
-            let deckCanvas = null;
-            
-            // Selector 1: Cari berdasarkan class deck-canvas
-            deckCanvas = document.querySelector('canvas.deck-canvas');
-            
-            // Selector 2: Jika tidak ditemukan, cari canvas di dalam container PyDeck
-            if (!deckCanvas) {{
-                const deckContainer = document.querySelector('[data-testid="stDeckGlJsonChart"]');
-                if (deckContainer) {{
-                    deckCanvas = deckContainer.querySelector('canvas');
-                }}
-            }}
-            
-            // Selector 3: Cari canvas dengan id yang mengandung 'deck'
-            if (!deckCanvas) {{
-                const allCanvases = document.querySelectorAll('canvas');
-                for (let canvas of allCanvases) {{
-                    if (canvas.id && canvas.id.toLowerCase().includes('deck')) {{
-                        deckCanvas = canvas;
-                        break;
-                    }}
-                }}
-            }}
-            
-            // Selector 4: Cari canvas terakhir yang ditambahkan (biasanya PyDeck)
-            if (!deckCanvas) {{
-                const allCanvases = document.querySelectorAll('canvas');
-                if (allCanvases.length > 0) {{
-                    deckCanvas = allCanvases[allCanvases.length - 1];
-                }}
-            }}
-            
-            if (deckCanvas) {{
-                try {{
-                    // Tunggu sebentar untuk memastikan rendering selesai
-                    setTimeout(function() {{
-                        const link = document.createElement('a');
-                        link.download = '{filename}';
-                        link.href = deckCanvas.toDataURL('image/png');
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        console.log('PyDeck map downloaded successfully');
-                    }}, 500);
-                }} catch (error) {{
-                    console.error('Error downloading PyDeck map:', error);
-                    alert('Gagal mengunduh peta. Error: ' + error.message);
-                }}
-            }} else {{
-                alert('Canvas PyDeck tidak ditemukan! Pastikan peta sudah dimuat sepenuhnya.');
-                console.log('Available canvases:', document.querySelectorAll('canvas'));
-            }}
-        }};
-    }}
-    </script>
-    <button onclick="window.downloadPydeckMap()" style="display:inline-block; text-align:center; text-decoration:none; color:white; background-color:#17a2b8; padding:10px 20px; border-radius:8px; font-weight:bold; border:none; cursor:pointer; margin:10px 0;">📥 Unduh Peta PyDeck</button>
-    """
-    return script
-
-# ALTERNATIF SOLUSI: Gunakan st.download_button dengan screenshot
-# Tambahkan fungsi ini sebagai alternatif jika JavaScript tidak bekerja:
-
-def create_pydeck_download_alternative():
-    """
-    Alternatif untuk download PyDeck - memberikan instruksi manual
-    """
-    st.info("""
-    **Cara mengunduh peta PyDeck:**
-    1. Klik kanan pada peta di atas
-    2. Pilih "Save image as..." atau "Simpan gambar sebagai..."
-    3. Pilih lokasi dan nama file untuk menyimpan
-    
-    *Atau gunakan screenshot tool browser Anda (Ctrl+Shift+S di Chrome/Firefox)*
-    """)
-
-# SOLUSI TAMBAHAN: Menggunakan komponen HTML yang lebih reliable
-def get_improved_pydeck_download_script(filename="pydeck_map.png"):
     script = f"""
     <div style="margin: 10px 0;">
         <button id="downloadPydeckBtn" onclick="downloadPydeckMap()" 
                 style="display:inline-block; text-align:center; text-decoration:none; 
-                       color:white; background-color:#17a2b8; padding:10px 20px; 
-                       border-radius:8px; font-weight:bold; border:none; cursor:pointer;">
+                        color:white; background-color:#17a2b8; padding:10px 20px; 
+                        border-radius:8px; font-weight:bold; border:none; cursor:pointer;">
             📥 Unduh Peta PyDeck
         </button>
         <span id="downloadStatus" style="margin-left: 10px; color: #666;"></span>
@@ -554,26 +496,19 @@ def get_improved_pydeck_download_script(filename="pydeck_map.png"):
         const statusEl = document.getElementById('downloadStatus');
         statusEl.textContent = 'Mencari canvas...';
         
-        // Tunggu sebentar untuk memastikan peta sudah render
         setTimeout(() => {{
             let deckCanvas = null;
-            
-            // Metode 1: Cari canvas dengan ukuran yang wajar (biasanya peta)
             const allCanvases = document.querySelectorAll('canvas');
             for (let canvas of allCanvases) {{
                 const rect = canvas.getBoundingClientRect();
-                // Cari canvas yang cukup besar (kemungkinan peta)
-                if (rect.width > 300 && rect.height > 200) {{
+                if (rect.width > 300 && rect.height > 200) {{ // Heuristic to find map canvas
                     deckCanvas = canvas;
                     break;
                 }}
             }}
-            
-            // Metode 2: Jika tidak ditemukan, ambil canvas terbesar
-            if (!deckCanvas && allCanvases.length > 0) {{
+            if (!deckCanvas && allCanvases.length > 0) {{ // Fallback to largest canvas
                 let largestCanvas = allCanvases[0];
                 let largestArea = 0;
-                
                 for (let canvas of allCanvases) {{
                     const rect = canvas.getBoundingClientRect();
                     const area = rect.width * rect.height;
@@ -588,18 +523,14 @@ def get_improved_pydeck_download_script(filename="pydeck_map.png"):
             if (deckCanvas) {{
                 try {{
                     statusEl.textContent = 'Mengunduh...';
-                    
-                    // Buat link download
                     const link = document.createElement('a');
                     link.download = '{filename}';
                     link.href = deckCanvas.toDataURL('image/png', 0.9);
                     document.body.appendChild(link);
                     link.click();
                     document.body.removeChild(link);
-                    
                     statusEl.textContent = '✅ Berhasil diunduh!';
                     setTimeout(() => {{ statusEl.textContent = ''; }}, 3000);
-                    
                 }} catch (error) {{
                     console.error('Download error:', error);
                     statusEl.textContent = '❌ Gagal mengunduh';
@@ -609,7 +540,7 @@ def get_improved_pydeck_download_script(filename="pydeck_map.png"):
                 statusEl.textContent = '❌ Canvas tidak ditemukan';
                 setTimeout(() => {{ statusEl.textContent = ''; }}, 3000);
             }}
-        }}, 1000); // Tunggu 1 detik untuk memastikan rendering selesai
+        }}, 1000);
     }}
     </script>
     """
@@ -619,26 +550,22 @@ def get_improved_pydeck_download_script(filename="pydeck_map.png"):
 # MAIN APP LAYOUT
 # =============================================================================
 script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else os.getcwd()
-umkm_file_path = os.path.join(script_dir, "umkm_batu_clustered.csv")
+umkm_file_path = os.path.join(script_dir, "umkm_batu_clustered.csv") 
 geojson_base_path = os.path.join(script_dir, "35.79_Kota_Batu")
 geojson_kelurahan_path = os.path.join(geojson_base_path, "35.79_kelurahan.geojson")
 geojson_kecamatan_path = os.path.join(geojson_base_path, "35.79_kecamatan.geojson")
 
-# Inisialisasi session state untuk otentikasi
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
 
-# Inisialisasi data utama di session_state jika belum ada
 if 'main_data' not in st.session_state:
     st.session_state['main_data'] = load_and_process_initial_data(umkm_file_path, geojson_kelurahan_path, geojson_kecamatan_path, _poi_data=POI_WISATA)
 
-# Gunakan data dari session_state
 df = st.session_state['main_data']
 
 if df is not None:
     st.sidebar.header("⚙️ Filter & Tampilan")
     
-    # Filter di Sidebar
     kecamatan_display_map = df[['kecamatan_display', 'nama_kecamatan_akurat']].drop_duplicates().sort_values('kecamatan_display')
     selected_kecamatan_display = st.sidebar.multiselect("Pilih Kecamatan:", kecamatan_display_map['kecamatan_display'].unique(), default=kecamatan_display_map['kecamatan_display'].unique())
     selected_kecamatan = kecamatan_display_map[kecamatan_display_map['kecamatan_display'].isin(selected_kecamatan_display)]['nama_kecamatan_akurat'].tolist()
@@ -653,84 +580,202 @@ if df is not None:
 
     map_theme = st.sidebar.radio("Tema Peta:", ("Terang", "Gelap"), horizontal=True)
 
-    # Proses Filter Utama
     df_filtered = df[df['nama_kecamatan_akurat'].isin(selected_kecamatan) & df['nama_sektor'].isin(selected_sektor)]
     if selected_desa:
         df_filtered = df_filtered[df_filtered['nama_desa_akurat'].isin(selected_desa)]
 
-    # --- Bagian Unggah Data Baru ---
     st.sidebar.markdown("---")
     st.sidebar.header("⬆️ Unggah Data Baru")
-    st.sidebar.markdown("Unggah file CSV UMKM baru dengan kolom: `namausaha`, `kegiatan`, `latitude`, `longitude`, `nama_sektor`.")
-    uploaded_file = st.sidebar.file_uploader("Pilih file CSV", type="csv")
+    st.sidebar.info("Untuk panduan format file dan unggah, silakan kunjungi tab 'Panduan Penggunaan' di halaman utama.")
+    
+    with st.sidebar.form(key='upload_form'):
+        uploaded_file = st.file_uploader("Pilih file CSV atau XLSX", type=["csv", "xlsx"])
+        submit_button = st.form_submit_button(label='Proses Unggahan')
 
-    if uploaded_file is not None:
-        try:
-            new_df = pd.read_csv(uploaded_file)
-            required_cols = ['namausaha', 'kegiatan', 'latitude', 'longitude', 'nama_sektor']
-            if not all(col in new_df.columns for col in required_cols):
-                st.sidebar.error("File CSV harus memiliki semua kolom yang diperlukan: 'namausaha', 'kegiatan', 'latitude', 'longitude', 'nama_sektor'.")
-            else:
-                # Proses data baru mirip dengan data awal
-                new_df.dropna(subset=['latitude', 'longitude'], inplace=True)
-                new_gdf = gpd.GeoDataFrame(new_df, geometry=gpd.points_from_xy(new_df.longitude, new_df.latitude), crs="EPSG:4326")
+        if submit_button and uploaded_file is not None:
+            try:
+                with st.spinner("Membaca file yang diunggah..."):
+                    file_extension = os.path.splitext(uploaded_file.name)[1].lower()
+                    if file_extension == '.csv':
+                        new_df = pd.read_csv(uploaded_file)
+                    elif file_extension == '.xlsx':
+                        new_df = pd.read_excel(uploaded_file)
+                    else:
+                        st.sidebar.error("Format file tidak didukung. Mohon unggah file .csv atau .xlsx.")
+                        st.stop()
+
+                st.sidebar.success(f"File '{uploaded_file.name}' berhasil dibaca.")
+
+                required_cols = ['namausaha', 'kegiatan', 'latitude', 'longitude', 'nama_sektor', 'kec', 'desa'] 
+                if not all(col in new_df.columns for col in required_cols):
+                    st.sidebar.error(f"File harus memiliki semua kolom yang diperlukan: {', '.join(required_cols)}.")
+                    st.stop()
                 
-                # Load GeoJSON files for spatial join (they are cached, so no performance hit)
-                gdf_desa_geo = gpd.read_file(geojson_kelurahan_path)
-                gdf_kecamatan_geo = gpd.read_file(geojson_kecamatan_path)
+                with st.spinner("Memproses data lokasi dan atribut UMKM..."):
+                    new_df.dropna(subset=['latitude', 'longitude'], inplace=True)
+                    new_gdf = gpd.GeoDataFrame(new_df, geometry=gpd.points_from_xy(new_df.longitude, new_df.latitude), crs="EPSG:4326")
+                    
+                    gdf_desa_geo = gpd.read_file(geojson_kelurahan_path)
+                    gdf_kecamatan_geo = gpd.read_file(geojson_kecamatan_path)
 
-                new_gdf = gpd.sjoin(new_gdf, gdf_desa_geo[['nm_kelurahan', 'geometry']], how="left", predicate='within').drop(columns=['index_right'])
-                new_gdf = gpd.sjoin(new_gdf, gdf_kecamatan_geo[['nm_kecamatan', 'geometry']], how="left", predicate='within').drop(columns=['index_right'])
+                st.sidebar.success("Data UMKM dasar siap.")
+
+                with st.spinner("Melakukan spatial join (pemetaan desa/kecamatan) untuk data baru..."):
+                    new_gdf = gpd.sjoin(new_gdf, gdf_desa_geo[['nm_kelurahan', 'geometry']], how="left", predicate='within').drop(columns=['index_right'])
+                    new_gdf = gpd.sjoin(new_gdf, gdf_kecamatan_geo[['nm_kecamatan', 'geometry']], how="left", predicate='within').drop(columns=['index_right'])
                 
-                new_gdf['nama_desa_akurat'] = new_gdf['nm_kelurahan'].str.title().fillna('Tidak Terpetakan')
-                new_gdf['nama_kecamatan_akurat'] = new_gdf['nm_kecamatan'].str.title().fillna('Tidak Terpetakan')
-                new_gdf['kecamatan_display'] = new_gdf['nama_kecamatan_akurat'].map(KECAMATAN_MAP).fillna(new_gdf['nama_kecamatan_akurat'])
-                new_gdf['desa_display'] = new_gdf['nama_desa_akurat'].map(DESA_MAP).fillna(new_gdf['nama_desa_akurat'])
+                st.sidebar.success("Spatial join selesai.")
 
-                new_gdf_proj = new_gdf.to_crs("EPSG:32749")
-                gdf_poi_proj = gpd.GeoDataFrame(geometry=[v for k, v in POI_WISATA.items()], crs="EPSG:4326").to_crs("EPSG:32749")
+                with st.spinner("Menormalkan nama desa/kecamatan dan menghitung jarak ke POI..."):
+                    new_gdf['nama_desa_akurat'] = new_gdf['nm_kelurahan'].str.title().fillna('Tidak Terpetakan')
+                    new_gdf['nama_kecamatan_akurat'] = new_gdf['nm_kecamatan'].str.title().fillna('Tidak Terpetakan')
+                    new_gdf['kecamatan_display'] = new_gdf['nama_kecamatan_akurat'].map(KECAMATAN_MAP).fillna(new_gdf['nama_kecamatan_akurat'])
+                    new_gdf['desa_display'] = new_gdf['nama_desa_akurat'].map(DESA_MAP).fillna(new_gdf['nama_desa_akurat'])
 
-                for i, umkm_point in new_gdf_proj.iterrows():
-                    distances = gdf_poi_proj.distance(umkm_point.geometry)
-                    new_gdf.loc[i, 'jarak_ke_poi_terdekat_m'] = distances.min()
+                    new_gdf_proj = new_gdf.to_crs("EPSG:32749")
+                    gdf_poi_proj = gpd.GeoDataFrame(geometry=[v for k, v in POI_WISATA.items()], crs="EPSG:4326").to_crs("EPSG:32749")
+
+                    new_gdf['jarak_ke_poi_terdekat_m'] = new_gdf_proj.geometry.apply(
+                        lambda umkm_point: gdf_poi_proj.distance(umkm_point).min()
+                    )
                 
-                # Hapus kolom temporer
-                new_gdf = new_gdf.drop(columns=['nm_kelurahan', 'nm_kecamatan'])
+                st.sidebar.success("Jarak ke POI berhasil dihitung.")
 
-                # Gabungkan data baru dengan data yang sudah ada di session_state
+                new_gdf = new_gdf.drop(columns=['nm_kelurahan', 'nm_kecamatan', 'kec', 'desa'], errors='ignore')
                 st.session_state['main_data'] = pd.concat([st.session_state['main_data'], new_gdf], ignore_index=True)
-                st.sidebar.success(f"Berhasil mengunggah {len(new_df)} UMKM baru! Data telah diperbarui.")
-
-                # Opsi unduh data gabungan ke Excel
+                
+                st.sidebar.success(f"Berhasil mengunggah {len(new_df)} UMKM baru! Data telah diperbarui dan siap dianalisis.")
                 st.sidebar.markdown(to_excel_download_link(st.session_state['main_data'], "umkm_batu_gabungan.xlsx", "📥 Unduh Data Gabungan (Excel)"), unsafe_allow_html=True)
-                # Force rerun to re-apply filters and update charts with new data
+                
                 st.rerun()
 
+            except Exception as e:
+                st.sidebar.error(f"Terjadi kesalahan saat memproses file: {e}")
+
+    # --- KARTU UNDUH TEMPLATE DATA (KODE BARU) ---
+    with st.sidebar.container(border=True):
+        st.markdown("<p style='text-align: center; font-weight: bold;'>Actual Dataset Source</p>", unsafe_allow_html=True)
+        try:
+            # Cek apakah file default (umkm_file_path) ada
+            if os.path.exists(umkm_file_path):
+                with open(umkm_file_path, "rb") as file:
+                    st.download_button(
+                        label="📥 Download (.csv)",
+                        data=file,
+                        file_name='umkm_batu_clustered.csv', # Nama file asli
+                        mime='text/csv', # Tipe file CSV
+                        use_container_width=True
+                    )
+            else:
+                 st.info("File template default tidak ditemukan.", icon="ℹ️")
         except Exception as e:
-            st.sidebar.error(f"Terjadi kesalahan saat memproses file: {e}")
+            st.error("Gagal memuat template.", icon="🚨")
+    # --- AKHIR KARTU ---
 
-    # Definisi Tabs
-    tab_list = ["📊 Ringkasan Umum", "🗺️ Peta Interaktif", "🔒 Analisis Lanjutan & AI"] # Nama tab sedikit diubah untuk menunjukkan penguncian
-    tab_summary, tab_map, tab_ai = st.tabs(tab_list)
+    # Define Tabs
+    tab_list = ["📖 Panduan Penggunaan", "📊 Ringkasan Umum", "🗺️ Peta Interaktif", "🔒 Analisis Lanjutan & AI"] 
+    tab_guide, tab_summary, tab_map, tab_ai = st.tabs(tab_list)
 
-    # === TAB 1: RINGKASAN UMUM ===
+    # === TAB: Panduan Penggunaan ===
+    with tab_guide:
+        st.header("📖 Panduan Penggunaan Dashboard")
+        st.write("Selamat datang di Dashboard Analitik & Prediktif UMKM Kota Batu! Dashboard ini dirancang untuk membantu Anda memahami persebaran, karakteristik, dan potensi lokasi UMKM di Kota Batu. Berikut adalah panduan singkat untuk menggunakannya:")
+
+        st.markdown("<h4>1. Navigasi Dashboard</h4>", unsafe_allow_html=True)
+        st.write("Gunakan tab di bagian atas halaman (`Ringkasan Umum`, `Peta Interaktif`, `Analisis Lanjutan & AI`) untuk beralih antara berbagai bagian analisis. Sidebar di sebelah kiri digunakan untuk filter data dan pengaturan tampilan.")
+
+        st.markdown("<h4>2. Mengunggah Data UMKM Baru</h4>", unsafe_allow_html=True)
+        st.write(
+            "Anda dapat memperbarui atau menambahkan data UMKM yang dianalisis dengan mengunggah file CSV atau XLSX baru melalui opsi 'Unggah Data Baru' di sidebar. "
+            "**Penting:** Pastikan format file Anda sesuai dengan panduan di bawah ini."
+        )
+
+        st.markdown("<h5>Format File CSV/XLSX yang Benar:</h5>", unsafe_allow_html=True)
+        st.write("File Anda harus memiliki kolom-kolom berikut dengan nama yang persis sama (case-sensitive) di baris pertama (header):")
+        
+        st.markdown("""
+        -   `namausaha`: Nama usaha UMKM.
+        -   `kegiatan`: Deskripsi kegiatan usaha.
+        -   `latitude`: Koordinat lintang (misal: `-7.871`).
+        -   `longitude`: Koordinat bujur (misal: `112.527`).
+        -   `nama_sektor`: Sektor usaha UMKM (misal: "Kuliner", "Fesyen", "Kerajinan").
+        -   `kec`: Nama Kecamatan (misal: "Batu", "Junrejo", "Bumiaji").
+        -   `desa`: Nama Desa/Kelurahan (misal: "Sisir", "Oro-Oro Ombo").
+        """)
+
+        st.markdown("<h5>Contoh Struktur File CSV/XLSX:</h5>", unsafe_allow_html=True)
+        contoh_data_csv = {
+            'namausaha': ['Warung Bu Ani', 'Butik Fashionku', 'Kerajinan Kayu Jaya', 'Café Santai'],
+            'kegiatan': ['Jual Nasi Pecel', 'Pakaian Muslim Wanita', 'Ukiran Kayu Jati', 'Kopi dan Snack'],
+            'latitude': [-7.8712, -7.8856, -7.8700, -7.8923],
+            'longitude': [112.5278, 112.5311, 112.5190, 112.5350],
+            'nama_sektor': ['Kuliner', 'Fesyen', 'Kerajinan', 'Kuliner'],
+            'kec': ['Batu', 'Batu', 'Junrejo', 'Batu'],
+            'desa': ['Sisir', 'Oro-Oro Ombo', 'Tlekung', 'Temas']
+        }
+        df_contoh_csv = pd.DataFrame(contoh_data_csv)
+        st.dataframe(df_contoh_csv, hide_index=True)
+        st.markdown("---")
+        st.markdown("<h4>3. Filter Data</h4>", unsafe_allow_html=True)
+        st.write("Gunakan filter di sidebar untuk menyaring data UMKM berdasarkan Kecamatan, Desa/Kelurahan, dan Sektor Usaha. Peta dan grafik akan diperbarui secara otomatis.")
+
+        st.markdown("<h4>4. Analisis Berbagai Tab</h4>", unsafe_allow_html=True)
+        st.markdown("-   **Ringkasan Umum**: Melihat jumlah total UMKM, sektor usaha teratas, dan grafik distribusi sektor.")
+        st.markdown("-   **Peta Interaktif**: Menjelajahi persebaran UMKM di peta. Anda bisa mengunduh peta dengan tombol di bawah peta PyDeck atau menggunakan ikon kamera di Plotly.")
+        st.markdown("-   **Analisis Lanjutan & AI**: Untuk analisis hotspot/coldspot spasial dan rekomendasi lokasi optimal dengan model AI. Tab ini dilindungi kata sandi.")
+        st.info("Kata sandi untuk tab Analisis Lanjutan & AI adalah `password`.")
+
+    # === TAB: Ringkasan Umum ===
     with tab_summary:
         st.header("📈 Ringkasan Analitik")
         col1, col2 = st.columns(2)
+        
         total_umkm_terfilter = len(df_filtered)
-        col1.metric("🏪 Total UMKM Terfilter", f"{total_umkm_terfilter:,}")
-        if not df_filtered.empty:
-            sektor_top = df_filtered['nama_sektor'].value_counts().nlargest(1)
-            col2.metric("🛍️ Sektor Usaha Teratas", sektor_top.index[0], f"{sektor_top.iloc[0]:,} UMKM")
-        else:
-            col2.metric("🛍️ Sektor Usaha Teratas", "N/A", "Tidak ada data")
+        
+        # Card kiri - Total UMKM dengan font besar
+        with col1:
+            st.markdown(f"""
+            <div style="text-align: center; padding: 1rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">🏪 Total UMKM Terfilter</div>
+                <div style="font-size: 3rem; font-weight: bold; color: #1f77b4; margin: 0;">{total_umkm_terfilter:,}</div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Card kanan - Sektor Teratas dengan font normal
+        with col2:
+            if not df_filtered.empty:
+                sektor_top = df_filtered['nama_sektor'].value_counts().nlargest(1)
+                sektor_nama = sektor_top.index[0]
+                sektor_jumlah = sektor_top.iloc[0]
+                
+                st.markdown(f"""
+                <div style="text-align: center; padding: 1rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">🛍️ Sektor Usaha Teratas</div>
+                    <div style="font-size: 1.5rem; font-weight: 600; color: #333; margin-bottom: 0.3rem;">{sektor_nama}</div>
+                    <div style="font-size: 1.5rem; color: #28a745; font-weight: 500;">{sektor_jumlah:,} UMKM</div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <div style="text-align: center; padding: 1rem; background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">🛍️ Sektor Usaha Teratas</div>
+                    <div style="font-size: 1.2rem; font-weight: 600; color: #333; margin-bottom: 0.3rem;">N/A</div>
+                    <div style="font-size: 1rem; color: #28a745; font-weight: 500;">Tidak ada data</div>
+                </div>
+                """, unsafe_allow_html=True)
         
         st.markdown("---")
         st.header("Grafik Analitik Sektor Usaha")
         if not df_filtered.empty:
             sektor_counts = df_filtered['nama_sektor'].value_counts().nlargest(15).sort_values(ascending=True)
             fig_sektor = px.bar(sektor_counts, y=sektor_counts.index, x=sektor_counts.values, orientation='h', title="Top 15 Sektor Usaha", labels={'x': 'Jumlah UMKM', 'y': ''}, text_auto=True, template="streamlit", color_discrete_sequence=px.colors.sequential.Blues_r)
-            st.plotly_chart(fig_sektor.update_layout(showlegend=False, yaxis_title=None), use_container_width=True)
+            fig_sektor.update_layout(
+                showlegend=False, 
+                yaxis_title=None,
+                yaxis=dict(automargin=True),
+                height=min(600, len(sektor_counts) * 40 + 150)
+            )
+            st.plotly_chart(fig_sektor, use_container_width=True)
         else:
             st.info("Tidak ada data sektor usaha untuk ditampilkan.")
         
@@ -740,9 +785,9 @@ if df is not None:
             st.markdown(get_table_download_link(df_filtered, "umkm_terfilter.csv", "📥 Unduh CSV Data Terfilter"), unsafe_allow_html=True)
             display_cols = ['namausaha', 'nama_sektor', 'desa_display', 'kecamatan_display', 'jarak_ke_poi_terdekat_m']
             st.dataframe(df_filtered[display_cols], use_container_width=True, height=400,
-                         column_config={"jarak_ke_poi_terdekat_m": st.column_config.NumberColumn("Jarak ke Wisata (m)", format="%d m")})
+                        column_config={"jarak_ke_poi_terdekat_m": st.column_config.NumberColumn("Jarak ke Wisata (m)", format="%d m")})
 
-    # === TAB 2: PETA INTERAKTIF ===
+    # === TAB: Peta Interaktif ===
     with tab_map:
         st.header("🗺️ Peta Persebaran & Kepadatan UMKM")
         file_map = {'Kota': "35.79_Kota_Batu.geojson", 'Kecamatan': "35.79_kecamatan.geojson", 'Kelurahan/Desa': "35.79_kelurahan.geojson"}
@@ -759,11 +804,11 @@ if df is not None:
             umkm_geojson = {"type": "FeatureCollection", "features": [
                 {"type": "Feature", "geometry": {"type": "Point", "coordinates": [row["longitude"], row["latitude"]]},
                 "properties": {"color": row["color_rgb"], "radius": 30, "is_umkm_point": True,
-                                "tooltip_html": f"""<div style='max-width:300px; background:rgba(0,0,0,0.8); color:white; padding:10px; border-radius:5px;'>
-                                                    <div style='font-size:1.1em; font-weight:bold; margin-bottom:8px;'>🏪 Nama Usaha: {row.get('namausaha', 'N/A')}</div>
-                                                    <div style='margin-bottom:4px;'><span style='color:#FCD34D;'>🛍️ Sektor:</span> {row.get('nama_sektor', 'N/A')}</div>
-                                                    <div style='margin-bottom:4px;'><span style='color:#34D399;'>📍 Desa:</span> {row.get('desa_display', 'N/A')}</div>
-                                                </div>"""}}
+                               "tooltip_html": f"""<div style='max-width:300px; background:rgba(0,0,0,0.8); color:white; padding:10px; border-radius:5px;'>
+                                        <div style='font-size:1.1em; font-weight:bold; margin-bottom:8px;'>🏪 Nama Usaha: {row.get('namausaha', 'N/A')}</div>
+                                        <div style='margin-bottom:4px;'><span style='color:#FCD34D;'>🛍️ Sektor:</span> {row.get('nama_sektor', 'N/A')}</div>
+                                        <div style='margin-bottom:4px;'><span style='color:#34D399;'>📍 Desa:</span> {row.get('desa_display', 'N/A')}</div>
+                                    </div>"""}}
                 for _, row in df_filtered_map.iterrows()
             ]}
             boundary_geojson = calculate_area_statistics(df_filtered_map.copy(), geojson_data, 'Kelurahan/Desa') if geojson_data else None
@@ -777,19 +822,16 @@ if df is not None:
                 layers.append(pdk.Layer('GeoJsonLayer', data=umkm_geojson, get_fill_color='properties.color', get_radius='properties.radius', pickable=True, auto_highlight=True))
             
             if layers:
-                # Tampilkan peta PyDeck
                 st.pydeck_chart(pdk.Deck(map_style=mapbox_style, initial_view_state=view_state, layers=layers, tooltip={"html": "{tooltip_html}"}))
                 
-                # Opsi download yang diperbaiki
+                # Download options
                 st.markdown("### 📥 Unduh Peta")
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    # Tombol download dengan JavaScript yang diperbaiki
-                    st.markdown(get_improved_pydeck_download_script("peta_umkm_batu.png"), unsafe_allow_html=True)
+                    st.markdown(get_pydeck_download_script("peta_umkm_batu.png"), unsafe_allow_html=True)
                 
                 with col2:
-                    # Alternatif instruksi manual
                     with st.expander("💡 Panduan Download Manual"):
                         st.markdown("""
                         **Jika tombol download tidak bekerja:**
@@ -802,7 +844,7 @@ if df is not None:
             else:
                 st.warning("Tidak ada data untuk ditampilkan di peta dengan filter saat ini.")
 
-            # Legenda Warna Dinamis
+            # Dynamic Color Legend
             if not df_filtered_map.empty:
                 st.markdown("---")
                 st.subheader("🎨 Keterangan Warna Titik UMKM (Sektor Usaha)")
@@ -816,7 +858,7 @@ if df is not None:
         else:
             st.warning("Tidak ada data untuk ditampilkan di peta dengan filter saat ini.")
 
-        # Peta Kepadatan Desa (Choropleth) - bagian ini tetap sama
+        # Density Map (Choropleth)
         st.markdown("---")
         st.subheader("📊 Peta Kepadatan Jumlah UMKM per Desa/Kelurahan")
         st.info("💡 Untuk mengunduh peta ini, arahkan kursor ke peta dan klik ikon kamera di pojok kanan atas.")
@@ -824,39 +866,67 @@ if df is not None:
         geojson_data_desa = load_local_geojson(geojson_kelurahan_path)
         if not df_filtered.empty and geojson_data_desa:
             umkm_per_desa = df_filtered.groupby('nama_desa_akurat')['namausaha'].count().reset_index(name='Jumlah UMKM')
+            
+            geojson_data_desa_modified = json.loads(json.dumps(geojson_data_desa))
+            for feature in geojson_data_desa_modified['features']:
+                if 'nm_kelurahan' in feature['properties']:
+                    feature['properties']['nm_kelurahan'] = str(feature['properties']['nm_kelurahan']).title()
+
             fig_choro = px.choropleth_mapbox(
-                umkm_per_desa, geojson=geojson_data_desa, locations='nama_desa_akurat',
-                featureidkey="properties.nm_kelurahan", color='Jumlah UMKM',
+                umkm_per_desa, geojson=geojson_data_desa_modified,
+                locations='nama_desa_akurat',
+                featureidkey="properties.nm_kelurahan",
+                color='Jumlah UMKM',
                 color_continuous_scale="Plasma",
                 mapbox_style="carto-positron" if map_theme == "Terang" else "carto-darkmatter",
                 center={"lat": -7.87, "lon": 112.52}, zoom=10.5,
                 hover_name='nama_desa_akurat', hover_data={'Jumlah UMKM': True, 'nama_desa_akurat': False}
             )
-            fig_choro.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
+            fig_choro.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, height=600)
             st.plotly_chart(fig_choro, use_container_width=True)
         else:
             st.warning("Tidak ada data untuk membuat peta kepadatan.")
 
-    # === TAB 3: ANALISIS LANJUTAN & AI (DIKUNCI) ===
+    # === TAB: Analisis Lanjutan & AI (Locked) ===
     with tab_ai:
         if not st.session_state['authenticated']:
             st.warning("Tab ini dilindungi kata sandi. Silakan masukkan kata sandi untuk mengakses.")
             password_input = st.text_input("Kata Sandi:", type="password")
-            if password_input == "password": # Kata sandi yang diinginkan
+            if password_input == "password": # Desired password
                 st.session_state['authenticated'] = True
                 st.success("Akses diberikan! Silakan refresh halaman atau ubah tab untuk melihat konten.")
-                st.rerun() # Refresh untuk menampilkan konten tab
-            elif password_input != "": # Jika user sudah input tapi salah
+                st.rerun() # Refresh to display tab content
+            elif password_input != "": # If user entered an incorrect password
                 st.error("Kata sandi salah.")
         else:
             st.header("🔬 Analisis Spasial Statistik: Hotspot & Coldspot")
-            st.info("Analisis ini mengidentifikasi di mana UMKM terkonsentrasi secara signifikan (Sentra Bisnis) dan di mana mereka jarang ditemukan (Area Sepi) berdasarkan statistik spasial.")
+            st.info("""
+            Analisis Hotspot dan Coldspot menggunakan metode statistik spasial **Getis-Ord Gi\*** untuk mengidentifikasi area di mana UMKM terkonsentrasi secara signifikan (Hotspot) atau jarang ditemukan (Coldspot). Ini membantu memahami pola spasial yang tidak terlihat hanya dari peta kepadatan biasa.
+            
+            **Bagaimana Cara Kerjanya?**
+            Metode ini membandingkan jumlah UMKM di suatu desa dengan jumlah UMKM di desa-desa tetangganya. Jika suatu desa memiliki banyak UMKM dan dikelilingi oleh desa-desa yang juga memiliki banyak UMKM, maka desa tersebut berpotensi menjadi 'Hotspot'. Sebaliknya, jika suatu desa memiliki sedikit UMKM dan dikelilingi oleh desa-desa dengan sedikit UMKM, desa tersebut berpotensi menjadi 'Coldspot'.
+            
+            **Metrik Statistik:**
+            -   **Z-score**: Mengukur berapa standar deviasi nilai suatu fitur dari rata-rata. Z-score positif yang besar menunjukkan pengelompokan nilai tinggi (hotspot), sedangkan Z-score negatif yang kecil menunjukkan pengelompokan nilai rendah (coldspot).
+            -   **Pseudo P-value (simulasi)**: Mengestimasi probabilitas bahwa pola spasial yang diamati terjadi secara acak. Nilai P-value yang kecil (misalnya, kurang dari 0.05) menunjukkan bahwa pengelompokan tersebut signifikan secara statistik, bukan karena kebetulan.
+            """)
+
+            with st.expander("❓ Memahami Hasil Getis-Ord Gi*: Kenapa 'Tidak Signifikan'?"):
+                st.markdown("""
+                Jika sebagian besar atau seluruh area diklasifikasikan sebagai **"Tidak Signifikan"**, ini adalah hasil analisis statistik yang normal dan bukan berarti ada kesalahan dalam perhitungan. Ini dapat terjadi karena beberapa alasan:
+                
+                1.  **Distribusi UMKM Cenderung Acak atau Merata**: Artinya, jumlah UMKM di setiap desa tidak terkonsentrasi secara ekstrem pada satu area dan juga tidak terlalu jarang di area lain secara signifikan. Pola persebaran UMKM di Kota Batu mungkin memang cenderung merata.
+                2.  **Variasi Data yang Kurang Signifikan**: Jika perbedaan jumlah UMKM antar desa tidak terlalu besar atau menonjol secara statistik, maka algoritma tidak akan menemukan pengelompokan yang "signifikan" (yaitu, sangat tidak mungkin terjadi secara kebetulan).
+                3.  **Keterbatasan Data**: Dengan data UMKM saat ini, mungkin tidak ada pola spasial yang cukup kuat untuk memenuhi ambang batas signifikansi statistik yang ketat (Z-score dan p-value).
+                
+                **Implikasi "Tidak Signifikan":**
+                Ini berarti tidak ada *bukti statistik yang kuat* untuk menyatakan bahwa ada "kantong" Hotspot atau Coldspot UMKM yang jelas pada tingkat kepercayaan 95%. Dalam konteks kebijakan, ini bisa berarti bahwa upaya pengembangan UMKM mungkin tidak perlu difokuskan pada area-area spesifik berdasarkan kepadatan saja, melainkan pada faktor-faktor lain atau strategi yang lebih merata.
+                """)
             
             gdf_desa_geojson = gpd.read_file(geojson_kelurahan_path)
-            # Pastikan calculate_hotspots menerima df dari session_state
             gdf_desa_hotspot = calculate_hotspots(gdf_desa_geojson, st.session_state['main_data'])
             
-            # Peta Hotspot
+            # Hotspot Map (Choropleth)
             color_discrete_map = {
                 'Hotspot (Sentra Bisnis)': 'red',
                 'Coldspot (Area Sepi)': 'blue',
@@ -871,29 +941,42 @@ if df is not None:
                 hover_name='nm_kelurahan', opacity=0.6,
                 hover_data={'jumlah_umkm': True}
             )
-            fig_hotspot.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, legend_title_text='Klasifikasi Area')
+            fig_hotspot.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, legend_title_text='Klasifikasi Area', height=600)
             st.plotly_chart(fig_hotspot, use_container_width=True)
 
             st.markdown("---")
             
             st.header("🤖 Rekomendasi Lokasi Optimal (AI)")
-            st.info("Pilih sektor usaha untuk melihat peta potensi lokasi. Model AI memprediksi skor kelayakan berdasarkan jarak ke tempat wisata dan pola lokasi UMKM sejenis yang sudah ada.")
+            st.info("""
+            Model AI ini membantu memprediksi seberapa "layak" atau "potensial" suatu lokasi baru untuk UMKM berdasarkan pola lokasi UMKM sejenis yang sudah ada dan jaraknya ke Poin of Interest (POI) wisata.
+            
+            **Bagaimana Cara Kerjanya?**
+            1.  **Pembelajaran dari Data Eksisting**: Model ini (Random Forest Regressor) dilatih menggunakan data UMKM yang sudah ada. Ia mempelajari hubungan antara lokasi (latitude, longitude), jarak ke POI wisata, dengan 'skor kelayakan' simulasi dari UMKM yang sudah ada.
+            2.  **Skor Kelayakan Simulasi**: Karena data kinerja bisnis riil (misalnya, omset atau jumlah pelanggan) tidak tersedia, kami membuat 'skor kelayakan' simulasi. Skor ini dihitung berdasarkan seberapa dekat UMKM dengan POI wisata utama (semakin dekat, semakin tinggi skornya, dan kemudian dinormalisasi antara 0-1). Ini adalah **representasi yang disederhanakan** dari potensi sukses, dan dalam aplikasi nyata, data kinerja bisnis akan sangat meningkatkan akurasi model.
+            3.  **Prediksi pada Grid**: Setelah dilatih, model memprediksi skor kelayakan untuk ribuan titik lokasi potensial di seluruh Kota Batu (dalam bentuk grid).
+            
+            **Metrik Data Science:**
+            -   **Random Forest Regressor**: Ini adalah algoritma Machine Learning yang robust, sering digunakan untuk prediksi. Ia bekerja dengan membangun banyak "pohon keputusan" dan menggabungkan hasilnya untuk prediksi yang lebih akurat.
+            -   **Skor Kelayakan (Suitability Score)**: Output model, menunjukkan potensi lokasi. Semakin tinggi skornya (mendekati 1), semakin tinggi potensi kelayakannya berdasarkan pola yang dipelajari.
+            
+            **Implikasi:**
+            -   Membantu calon pelaku UMKM dalam menentukan lokasi strategis.
+            -   Memberikan informasi bagi pemerintah daerah untuk merencanakan pengembangan UMKM di area yang berpotensi tinggi.
+            -   **Penting**: Model ini adalah alat pendukung keputusan. Keputusan akhir harus mempertimbangkan faktor-faktor lain seperti demografi, persaingan lokal, peraturan, dan ketersediaan sumber daya.
+            """)
 
             selected_sector_ai = st.selectbox("Pilih Sektor Usaha untuk Analisis AI:", options=sektor_list)
 
             if selected_sector_ai:
-                # Pastikan train_suitability_model menerima df dari session_state
                 model = train_suitability_model(st.session_state['main_data'], selected_sector_ai)
                 if model:
                     with st.spinner(f"Menganalisis dan membuat peta prediksi untuk '{selected_sector_ai}'..."):
                         bounds = st.session_state['main_data'].total_bounds
                         grid_df = create_prediction_grid(bounds, _poi_data=POI_WISATA)
                         
-                        # Prediksi menggunakan model
                         features_for_prediction = grid_df[['latitude', 'longitude', 'jarak_ke_poi_terdekat_m']]
                         grid_df['suitability_score'] = model.predict(features_for_prediction)
 
-                        # Visualisasi Heatmap
                         view_state = pdk.ViewState(latitude=-7.87, longitude=112.52, zoom=11, pitch=50)
                         heatmap_layer = pdk.Layer(
                             'HeatmapLayer',
@@ -912,7 +995,7 @@ if df is not None:
                         ))
                         st.success(f"Peta potensi untuk sektor '{selected_sector_ai}' berhasil dibuat. Area dengan warna lebih 'panas' (merah/kuning) menunjukkan potensi yang lebih tinggi.")
                 else:
-                    st.warning(f"Tidak cukup data untuk sektor '{selected_sector_ai}' untuk membangun model AI yang andal.")
+                    st.warning(f"Tidak cukup data untuk sektor '{selected_sector_ai}' untuk membangun model AI yang andal. Diperlukan setidaknya 10 data UMKM untuk sektor ini.")
 
 else:
     st.error("Gagal memuat data utama. Pastikan file CSV dan GeoJSON ada di direktori yang benar.")

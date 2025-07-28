@@ -1,5 +1,5 @@
 # ==============================================================================
-# STREAMLIT DASHBOARD - KODE LENGKAP, FINAL, DAN SIAP PRODUKSI
+# STREAMLIT DASHBOARD - KODE LENGKAP, FINAL, DAN SIAP PRODUKSI (REVISI 3)
 # ==============================================================================
 import streamlit as st
 import pandas as pd
@@ -52,39 +52,34 @@ st.markdown("""
     .main .block-container { background: transparent; backdrop-filter: none; box-shadow: none; padding: 2rem; margin-top: 1rem; }
     h1 { font-size: 3rem; font-weight: 700; text-align: center; background: linear-gradient(135deg, #667eea, #764ba2); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 2rem; }
 
-    /* --- PERUBAHAN: STYLING KARTU METRIK MENJADI UNGU --- */
     .metric-card {
-        background: linear-gradient(135deg, #3b4477, #6a72d9); /* Gradasi Ungu Baru */
+        background: linear-gradient(135deg, #3b4477, #6a72d9);
         border-radius: 16px;
         padding: 1.5rem;
         margin: 1rem 0;
         transition: transform 0.3s ease, box-shadow 0.3s ease;
-        color: white; /* Mengubah warna teks default menjadi putih */
+        color: white;
     }
 
     .metric-card:hover {
         transform: translateY(-5px);
-        box-shadow: 0 8px 30px rgba(142, 68, 173, 0.5); /* Bayangan ungu saat hover */
+        box-shadow: 0 8px 30px rgba(142, 68, 173, 0.5);
     }
 
-    /* Menyesuaikan teks judul dan subjudul di dalam kartu ungu */
     .metric-card .metric-title, .metric-card .metric-subtitle {
         color: white;
         opacity: 0.9;
     }
 
-    /* Menyesuaikan teks nilai utama (angka) di dalam kartu ungu */
     .metric-card .metric-value {
         font-size: 2.5rem;
         font-weight: 700;
         color: white;
-        background: none; /* Menghapus gradasi pada teks */
+        background: none;
         -webkit-background-clip: unset;
         -webkit-text-fill-color: unset;
     }
-    /* -------------------------------------------------------- */
 
-    /* Styling untuk container lain agar tetap transparan */
     .chart-container, .feature-card, .welcome-section {
         background: transparent;
         border: 1px solid rgba(128, 128, 128, 0.2);
@@ -99,13 +94,11 @@ st.markdown("""
         box-shadow: 0 8px 25px rgba(128, 128, 128, 0.1);
     }
     
-    /* Teks untuk container lain (tidak berubah) */
     .feature-card p, .welcome-section p {
         color: var(--text-color);
         opacity: 0.8;
     }
 
-    /* Nilai metrik umum jika digunakan di luar .metric-card (tidak berubah) */
     .metric-value {
         font-size: 2.5rem;
         font-weight: 700;
@@ -181,11 +174,9 @@ def load_and_process_data(uploaded_file=None):
     try:
         source = None
         if uploaded_file:
-            # Jika file diunggah oleh pengguna, gunakan file tersebut
             source = uploaded_file
             st.success(f"File '{uploaded_file.name}' berhasil dibaca. Menganalisis data baru...")
         else:
-            # Jika tidak, gunakan file default
             script_dir = Path(__file__).parent 
             source = script_dir / 'DDA2025_DinasPariwisata.xlsx'
             if not Path(source).exists():
@@ -288,7 +279,6 @@ def create_features_for_dest(df):
     return df_feat.fillna(0)
 
 def create_metric_card(title, value, subtitle=""):
-    # Fungsi ini sekarang hanya mengembalikan string HTML, styling utama ada di CSS.
     return f"""<div class="metric-card"><div class="metric-title">{title}</div><div class="metric-value">{value}</div><div class="metric-subtitle">{subtitle}</div></div>"""
 
 def format_number(num):
@@ -384,33 +374,6 @@ def get_destination_forecast(dest_name, _df_full):
 
     return df_dest, hist_predictions, forecast, insights, metrics_df, best_model_name, best_forecast_series
 
-@st.cache_data
-def get_all_destinations_forecast_wide(_df_full):
-    all_destinations = sorted(_df_full['destinasi'].dropna().unique().tolist())
-    all_forecasts_list = []
-
-    for dest in all_destinations:
-        _, _, _, _, _, _, best_forecast = get_destination_forecast(dest, _df_full)
-        if best_forecast is not None:
-            df_forecast = best_forecast.reset_index()
-            df_forecast.columns = ['tanggal', 'prediksi_pengunjung']
-            df_forecast['destinasi'] = dest
-            all_forecasts_list.append(df_forecast)
-
-    if not all_forecasts_list:
-        return pd.DataFrame()
-
-    long_forecast_df = pd.concat(all_forecasts_list, ignore_index=True)
-    wide_forecast = pd.pivot_table(long_forecast_df,
-                                   values='prediksi_pengunjung',
-                                   index='destinasi',
-                                   columns='tanggal',
-                                   fill_value=0)
-    
-    wide_forecast.columns = [d.strftime('%B %Y') for d in wide_forecast.columns]
-    
-    return wide_forecast.astype(int)
-
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
 
@@ -425,25 +388,48 @@ with st.sidebar:
     page = st.selectbox("Pilih Halaman", page_options, key="navigasi_utama")
     st.markdown("---")
     st.markdown(f"**📅 Tanggal:** {datetime.now().strftime('%d %B %Y')}")
-    st.markdown("**🔄 Versi:** 20.2 (Wide Tabel Destinasi)")
+    st.markdown("**🔄 Versi:** 21.2 (UI Update)")
     st.markdown("---")
     
-    # === FITUR BARU: UNGGAH FILE ===
-    st.markdown("### ⚙️ Pengaturan")
+    # === PENGATURAN DATA ===
+    st.markdown("### ⚙️ Pengaturan Data")
     uploaded_file = st.file_uploader(
         label="Unggah file data baru (.xlsx)",
         type="xlsx",
-        help="Analisis dataset pariwisata Anda sendiri dengan mengunggah file .xlsx baru. Pastikan format kolom dan sheet sama."
+        help="Analisis dataset pariwisata Anda sendiri. Pastikan format kolom dan sheet sama dengan template."
     )
-    # ===============================
+    
+    # --- FITUR BARU: UI UNDUH TEMPLATE YANG LEBIH BAIK ---
+    st.markdown("")
+    with st.container(border=True):
+        st.markdown("<h5 style='text-align: center;'>Actual Dataset Source</h5>", unsafe_allow_html=True)        
+        try:
+            # Menggunakan __file__ untuk mendapatkan path direktori skrip
+            script_dir = Path(__file__).parent
+            default_file_path = script_dir / 'DDA2025_DinasPariwisata.xlsx'
+
+            if default_file_path.exists():
+                with open(default_file_path, "rb") as file:
+                    st.download_button(
+                        label="📥 Download (.xlsx)",
+                        data=file,
+                        file_name="DDA2025_DinasPariwisata_Template.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True
+                    )
+            else:
+                st.info("File template tidak tersedia saat ini.", icon="ℹ️")
+
+        except Exception as e:
+            st.error("Gagal memuat template.", icon="🚨")
+    # ==================================================
+
 
 # --- MEMUAT DATA DI AWAL ---
-# Memanggil fungsi dengan file yang diunggah sebagai argumen
 data_tuple = load_and_process_data(uploaded_file)
 if data_tuple and all(item is not None for item in data_tuple):
     df_full, df_total, model_xgb, features, df_feat, dynamic_metrics = data_tuple
 else:
-    # Jika data gagal dimuat (baik default maupun unggahan), dashboard tidak akan melanjutkan
     df_full, df_total, model_xgb, features, df_feat, dynamic_metrics = (None,) * 6
     st.stop()
 
@@ -549,17 +535,17 @@ if page == "🏙️ Insight Kota Batu & Peramalan":
                 st.plotly_chart(fig_compare, use_container_width=True)
 
         st.markdown("---")
-        st.markdown("### Data Asli per Tahun")
+        st.markdown("### Data Aktual per Tahun")
         st.markdown("Tabel di bawah ini menampilkan data per destinasi, dipisahkan per tahun.")
 
         if df_full is not None and not df_full.empty:
-            years_asli = sorted(df_full['tahun'].unique())
-            tabs_asli = st.tabs([f"📄 Data Tahun {int(year)}" for year in years_asli])
+            years_aktual = sorted(df_full['tahun'].unique())
+            tabs_aktual = st.tabs([f"📄 Data Tahun {int(year)}" for year in years_aktual])
             
             months_order = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']
             
-            for i, year in enumerate(years_asli):
-                with tabs_asli[i]:
+            for i, year in enumerate(years_aktual):
+                with tabs_aktual[i]:
                     df_year = df_full[df_full['tahun'] == year]
                     
                     if not df_year.empty:
@@ -586,14 +572,12 @@ if page == "🏙️ Insight Kota Batu & Peramalan":
                     else:
                         st.info(f"Tidak ada data untuk tahun {int(year)}.")
         else:
-            st.warning("Data asli tidak dapat dimuat untuk ditampilkan.")
+            st.warning("Data aktual tidak dapat dimuat untuk ditampilkan.")
         st.markdown("---")
 
-        # --- BAGIAN KODE YANG DIKEMBALIKAN ---
         st.markdown("### Analisis Kinerja Model & Faktor Pendorong")
         st.markdown("##### Metrik Kinerja Model (pada Seluruh Data Historis)")
         st.markdown("Tabel ini membandingkan performa setiap model dalam memprediksi data historis. Metrik yang lebih rendah (kecuali R²) menunjukkan performa yang lebih baik.")
-
         
         comparison_metrics = {}
         y_true = df_feat['jumlah_wisatawan']
@@ -606,27 +590,23 @@ if page == "🏙️ Insight Kota Batu & Peramalan":
                 r2 = r2_score(y_true, y_pred)
                 comparison_metrics[model_name] = {'MAE': mae, 'RMSE': rmse, 'MAPE': mape, 'R²': r2}
         
-        best_total_model_name = ""
         if comparison_metrics:
             metrics_df = pd.DataFrame.from_dict(comparison_metrics, orient='index').dropna()
             if not metrics_df.empty:
-                best_total_model_name = metrics_df['RMSE'].idxmin()
-            st.dataframe(metrics_df.style.format({'MAE': '{:,.0f}', 'RMSE': '{:,.0f}', 'MAPE': '{:.2%}', 'R²': '{:.2%}'}), use_container_width=True)
-            st.markdown("""
-            <div style="margin-top: 1.5rem; padding: 1rem; border: 1px solid rgba(128,128,128,0.1); border-radius: 8px;">
-            <h6 style="margin-bottom: 1rem;">Penjelasan Indikator</h6>
-            <ul>
-                <li><strong>MAE (Mean Absolute Error):</strong> Memberi gambaran seberapa besar kesalahan prediksi dalam satuan asli (misal: jumlah wisatawan). <strong>Semakin mendekati 0, semakin baik.</strong></li>
-                <li><strong>RMSE (Root Mean Squared Error):</strong> Mirip dengan MAE, Berguna untuk melihat adanya prediksi yang sangat melenceng. <strong>Semakin mendekati 0, semakin baik.</strong></li>
-                <li><strong>MAPE (Mean Absolute Percentage Error):</strong> Rata-rata persentase kesalahan. Contoh: MAPE 15% berarti rata-rata prediksi meleset 15% dari nilai aktual. <strong>Semakin mendekati 0%, semakin baik.</strong></li>
-                <li><strong>R² (R-squared):</strong> Mengukur seberapa besar persentase variasi data yang dapat dijelaskan oleh model. Contoh: R² 0.85 berarti model mampu menjelaskan 85% pola data. <strong>Semakin mendekati 1, semakin baik.</strong></li>
-            </ul>
-            </div>
-            """, unsafe_allow_html=True)
+                st.dataframe(metrics_df.style.format({'MAE': '{:,.0f}', 'RMSE': '{:,.0f}', 'MAPE': '{:.2%}', 'R²': '{:.2%}'}), use_container_width=True)
+            
+            with st.container(border=True):
+                st.markdown("<strong>Penjelasan Indikator</strong>", unsafe_allow_html=True)
+                st.markdown("""
+                - **MAE (Mean Absolute Error):** Rata-rata absolut dari selisih prediksi dengan nilai aktual. Semakin kecil, semakin baik.
+                - **RMSE (Root Mean Squared Error):** Mirip MAE, namun memberikan bobot lebih pada kesalahan besar. Semakin kecil, semakin baik.
+                - **MAPE (Mean Absolute Percentage Error):** Rata-rata persentase kesalahan. Berguna untuk interpretasi relatif. Semakin kecil, semakin baik.
+                - **R² (R-squared):** Seberapa baik model menjelaskan variasi data. Semakin mendekati 1, semakin baik.
+                """)
 
         if 'XGBoost' in selected_models:
             st.markdown("---")
-            st.markdown("##### Faktor Pendorong Utama Prediksi (Khusus XGBoost)")
+            st.markdown("##### Faktor Pendorong Utama Prediksi (XGBoost)")
             feature_importance = pd.DataFrame({'feature': features, 'importance': models['XGBoost'].feature_importances_}).sort_values('importance', ascending=True)
             feature_names_map = {'lag_1': 'Jml Wisatawan Bulan Lalu', 'rolling_mean_3': 'Rata-rata 3 Bulan Terakhir', 'bulan': 'Bulan', 'is_libur_puncak': 'Status Musim Liburan', 'tahun': 'Tahun', 'kuartal': 'Kuartal'}
             feature_importance['feature_display'] = feature_importance['feature'].map(feature_names_map)
@@ -636,10 +616,8 @@ if page == "🏙️ Insight Kota Batu & Peramalan":
 
     else:
         st.markdown('<div class="error-msg">❌ Gagal memuat data untuk perbandingan model.</div>', unsafe_allow_html=True)
-# ... sisa kode tidak berubah dan tetap sama
 
-
-# --- HALAMAN ANALISIS DESTINASI ---
+# --- HALAMAN ANALISIS DESTINASI (DIRESTRUKTURISASI) ---
 elif page == "🏆 Peramalan per Destinasi":
     st.title("🏆 Peramalan per Destinasi")
     st.markdown("Pilih satu atau beberapa destinasi untuk melihat analisis mendalam, termasuk bulan puncak, akurasi model, dan peramalan kunjungan.")
@@ -648,31 +626,75 @@ elif page == "🏆 Peramalan per Destinasi":
         all_destinations = sorted(df_full['destinasi'].dropna().unique().tolist())
         top_5_default = df_full.groupby('destinasi')['jumlah_wisatawan'].sum().nlargest(5).index.tolist()
         
+        select_all = st.checkbox("Pilih semua destinasi")
+        
+        default_selection = all_destinations if select_all else top_5_default
+        
         selected_destinations = st.multiselect(
             "Pilih Destinasi untuk Dianalisis:",
             options=all_destinations,
-            default=top_5_default
+            default=default_selection
         )
         
-        forecasts_to_download = []
-
         if not selected_destinations:
             st.info("Silakan pilih minimal satu destinasi untuk memulai analisis.")
         else:
+            forecasts_to_download = []
+            all_analysis_data = {}
+
+            with st.spinner("Menganalisis dan meramal untuk semua destinasi terpilih..."):
+                for dest in selected_destinations:
+                    analysis_results = get_destination_forecast(dest, df_full)
+                    all_analysis_data[dest] = analysis_results
+                    
+                    _, _, _, _, _, best_model, best_forecast = analysis_results
+                    if best_forecast is not None:
+                        df_to_add = best_forecast.reset_index()
+                        df_to_add.columns = ['tanggal', 'prediksi_pengunjung']
+                        df_to_add['destinasi'] = dest
+                        df_to_add['model_terbaik'] = best_model
+                        forecasts_to_download.append(df_to_add)
+
+            if forecasts_to_download:
+                st.markdown("---")
+                st.markdown("### 📥 Unduh Data Peramalan per Destinasi")
+                st.markdown("Data di bawah ini berisi peramalan 12 bulan ke depan untuk destinasi yang Anda pilih, menggunakan model terbaik untuk masing-masing destinasi, disajikan dalam format tabel.")
+
+                combined_forecast_df = pd.concat(forecasts_to_download, ignore_index=True)
+                combined_forecast_df['prediksi_pengunjung'] = combined_forecast_df['prediksi_pengunjung'].astype(int)
+                combined_forecast_df['bulan_tahun'] = combined_forecast_df['tanggal'].dt.strftime('%B %Y')
+                
+                forecast_wide_table = pd.pivot_table(
+                    combined_forecast_df,
+                    values='prediksi_pengunjung',
+                    index='destinasi',
+                    columns='bulan_tahun',
+                    aggfunc='sum',
+                    fill_value=0
+                )
+                
+                unique_months = pd.to_datetime(combined_forecast_df['bulan_tahun'].unique(), format='%B %Y')
+                sorted_months_dt = sorted(unique_months)
+                sorted_month_columns = [dt.strftime('%B %Y') for dt in sorted_months_dt]
+                forecast_wide_table = forecast_wide_table.reindex(columns=sorted_month_columns, fill_value=0)
+
+                st.dataframe(forecast_wide_table, use_container_width=True)
+
+                csv_data_wide = convert_df_to_csv(forecast_wide_table.reset_index())
+                st.download_button(
+                    label="📥 Unduh Peramalan Destinasi (Format Tabel)",
+                    data=csv_data_wide,
+                    file_name="peramalan_per_destinasi_tabel.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            
             for dest in selected_destinations:
-                with st.spinner(f"Menganalisis dan meramal untuk {dest}..."):
-                    hist_data, hist_preds, forecast_data, insights, metrics_df, best_model, best_forecast = get_destination_forecast(dest, df_full)
+                hist_data, hist_preds, forecast_data, insights, metrics_df, _, _ = all_analysis_data[dest]
 
                 if hist_data is None:
                     st.warning(f"Data untuk **{dest}** tidak cukup untuk membuat analisis & peramalan.")
                     continue
-
-                if best_forecast is not None:
-                    df_to_add = best_forecast.reset_index()
-                    df_to_add.columns = ['tanggal', 'prediksi_pengunjung']
-                    df_to_add['destinasi'] = dest
-                    df_to_add['model_terbaik'] = best_model
-                    forecasts_to_download.append(df_to_add)
 
                 st.markdown(f"---")
                 st.markdown(f"<h3 style='text-align: center; color: #667eea;'>Analisis untuk: {dest}</h3>", unsafe_allow_html=True)
@@ -708,40 +730,6 @@ elif page == "🏆 Peramalan per Destinasi":
                 fig.update_xaxes(dtick="M1", tickformat="%b\n%Y")
                 
                 st.plotly_chart(fig, use_container_width=True)
-            
-            if forecasts_to_download:
-                st.markdown("---")
-                st.markdown("### 📥 Unduh Data Peramalan per Destinasi")
-                st.markdown("Data di bawah ini berisi peramalan 12 bulan ke depan untuk destinasi yang Anda pilih, menggunakan model terbaik untuk masing-masing destinasi, disajikan dalam format tabel.")
-
-                combined_forecast_df = pd.concat(forecasts_to_download, ignore_index=True)
-                combined_forecast_df['prediksi_pengunjung'] = combined_forecast_df['prediksi_pengunjung'].astype(int)
-                combined_forecast_df['bulan_tahun'] = combined_forecast_df['tanggal'].dt.strftime('%B %Y')
-                
-                forecast_wide_table = pd.pivot_table(
-                    combined_forecast_df,
-                    values='prediksi_pengunjung',
-                    index='destinasi',
-                    columns='bulan_tahun',
-                    aggfunc='sum',
-                    fill_value=0
-                )
-                
-                unique_months = pd.to_datetime(combined_forecast_df['bulan_tahun'].unique(), format='%B %Y')
-                sorted_months_dt = sorted(unique_months)
-                sorted_month_columns = [dt.strftime('%B %Y') for dt in sorted_months_dt]
-                forecast_wide_table = forecast_wide_table[sorted_month_columns]
-
-                st.dataframe(forecast_wide_table, use_container_width=True)
-
-                csv_data_wide = convert_df_to_csv(forecast_wide_table.reset_index())
-                st.download_button(
-                    label="📥 Unduh Peramalan Destinasi (Format Tabel)",
-                    data=csv_data_wide,
-                    file_name="peramalan_per_destinasi_tabel.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
 
     else:
         st.error("Gagal memuat data destinasi. Tidak dapat menampilkan analisis.")
