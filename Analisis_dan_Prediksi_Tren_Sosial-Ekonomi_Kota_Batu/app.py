@@ -1,19 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-Dashboard Streamlit - VERSI FINAL DENGAN PANDUAN
+Dashboard Streamlit - VERSI FINAL DENGAN PANDUAN (DINAMIS V2)
 
 Deskripsi:
 Aplikasi web interaktif yang menampilkan analisis dan prediksi data sosial-ekonomi
 untuk Kota Batu, dengan fitur unggah file dan panduan penggunaan terintegrasi.
+Versi ini dirancang untuk secara dinamis menyesuaikan tampilan berdasarkan rentang tahun data yang dimuat.
 
 Fitur Utama:
-1. Fitur unggah file Excel untuk analisis data tahun-tahun selanjutnya.
-2. Panduan penggunaan interaktif di halaman Beranda.
-3. Navigasi berbasis halaman (Beranda, PDRB, TPT, IPM, Kemiskinan).
-4. Dropdown interaktif untuk memilih indikator spesifik.
-5. Melatih 6 model prediksi dengan Prophet sebagai default.
-6. Menampilkan tabel data historis dan prediksi di bawah setiap grafik.
-7. Prediksi 3 tahun ke depan.
+1.  Fitur unggah file Excel untuk analisis data tahun-tahun selanjutnya.
+2.  Panduan penggunaan interaktif di halaman Beranda.
+3.  Navigasi berbasis halaman (Beranda, PDRB, TPT, IPM, Kemiskinan).
+4.  Dropdown interaktif untuk memilih indikator spesifik.
+5.  Melatih 6 model prediksi dengan Prophet sebagai default.
+6.  Menampilkan tabel data historis dan prediksi di bawah setiap grafik.
+7.  Prediksi 3 tahun ke depan.
+8.  Teks dan contoh data yang sepenuhnya dinamis menyesuaikan data yang diunggah.
 
 Cara Menjalankan:
 1. Pastikan pustaka terinstal: pip install streamlit pandas numpy plotly openpyxl scikit-learn statsmodels prophet
@@ -30,6 +32,7 @@ import numpy as np
 import plotly.graph_objects as go
 import os
 import warnings
+import datetime
 
 # Pustaka untuk pemodelan
 from sklearn.linear_model import LinearRegression
@@ -99,10 +102,8 @@ def load_data(source):
     try:
         if file_extension == '.xlsx':
             data = pd.read_excel(source, sheet_name='Sheet1', skiprows=3, engine='openpyxl')
-            # Pesan debug dihapus dari sini
         elif file_extension == '.csv':
             data = pd.read_csv(source, encoding='utf-8', sep=',', header=0)
-            # Pesan debug dihapus dari sini
         else:
             st.error(f"Format file '{file_extension}' tidak didukung. Mohon unggah file .xlsx atau .csv.")
             return None
@@ -187,30 +188,6 @@ with st.sidebar:
         help="Unggah file Excel dengan format yang sama untuk memperbarui data analisis."
     )
 
-    with st.container(border=True):
-        st.markdown("<p style='text-align: center; font-weight: bold;'>Actual Dataset Source</p>", unsafe_allow_html=True)
-        try:
-            if os.path.exists(DEFAULT_FILE_PATH):
-                with open(DEFAULT_FILE_PATH, "rb") as file:
-                    st.download_button(
-                        label="📥 Download (.xlsx)",
-                        data=file,
-                        file_name='Data Strategis Kota Batu 2010-2024.xlsx',
-                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                        use_container_width=True
-                    )
-            else:
-                 st.info("File template default tidak ditemukan.", icon="ℹ️")
-        except Exception as e:
-            st.error("Gagal memuat template.", icon="🚨")
-
-    available_models = ['Prophet', 'Gradient Boosting', 'Random Forest', 'Linear Regression', 'Holt-Winters', 'ARIMA']
-    selected_models = st.multiselect(
-        "Pilih Model untuk Ditampilkan:",
-        options=available_models,
-        default=['Prophet']
-    )
-
 data_source = None
 if uploaded_file is not None:
     data_source = uploaded_file
@@ -226,7 +203,10 @@ if df_main is None:
     st.warning("Data tidak berhasil dimuat. Dashboard tidak dapat ditampilkan.")
     st.stop()
 
-latest_year = max([int(c) for c in df_main.columns if c.isdigit()])
+# --- Mendapatkan tahun awal dan akhir secara dinamis ---
+year_cols_int = [int(c) for c in df_main.columns if c.isdigit()]
+start_year = min(year_cols_int)
+latest_year = max(year_cols_int)
 
 if uploaded_file is not None:
     st.sidebar.success(f"File '{uploaded_file.name}' berhasil dimuat!")
@@ -249,11 +229,35 @@ pdrb_options = sorted([opt for opt in [PDRB_ADHB, PDRB_ADHK] if opt])
 tpt_options = sorted([opt for opt in [ANGKATAN_KERJA, PENGANGGURAN, TPT] if opt])
 
 with st.sidebar:
+    with st.container(border=True):
+        st.markdown("<p style='text-align: center; font-weight: bold;'>Actual Dataset Source</p>", unsafe_allow_html=True)
+        try:
+            if os.path.exists(DEFAULT_FILE_PATH):
+                with open(DEFAULT_FILE_PATH, "rb") as file:
+                    st.download_button(
+                        label="📥 Download (.xlsx)",
+                        data=file,
+                        file_name=f'Data Strategis Kota Batu 2010-2024.xlsx',
+                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        use_container_width=True
+                    )
+            else:
+                st.info("File template default tidak ditemukan.", icon="ℹ️")
+        except Exception as e:
+            st.error("Gagal memuat template.", icon="🚨")
+
+    available_models = ['Prophet', 'Gradient Boosting', 'Random Forest', 'Linear Regression', 'Holt-Winters', 'ARIMA']
+    selected_models = st.multiselect(
+        "Pilih Model untuk Ditampilkan:",
+        options=available_models,
+        default=['Prophet']
+    )
+    
     st.markdown("<hr class='section-divider' style='margin: 20px 0;'>", unsafe_allow_html=True)
     st.markdown("<h3>ℹ️ Tentang Dashboard</h3>", unsafe_allow_html=True)
     st.info(f"""
     Dashboard ini menampilkan analisis dan perbandingan prediksi untuk indikator kunci di Kota Batu.
-    - **Data Historis**: Hingga {latest_year}
+    - **Data Historis**: {start_year}–{latest_year}
     - **Prediksi**: {latest_year + 1}–{latest_year + 3}
     - **Sumber**: BPS Kota Batu (diolah)
     """)
@@ -349,16 +353,26 @@ def display_analysis_view(indicator_name, y_label):
     - **Garis Putus-Putus Berwarna:** Prediksi model untuk masa depan (Forecast).
     """)
 
+    # Panggil fungsi prediksi yang di-cache
     historical_fit, future_forecast, evaluation_metrics, hist_years, future_years = generate_all_predictions(indicator_name, df_main)
+    
+    # --- PERBAIKAN KUNCI ---
+    # Selalu ambil data historis langsung dari df_main saat ini untuk diplot.
+    # Ini untuk memastikan plot "Data Aktual" selalu diperbarui saat file baru diunggah,
+    # menghindari masalah dari data cache.
     historical_data = df_main.loc[indicator_name].dropna()
-    hist_values = [historical_data.get(str(year)) for year in hist_years]
+    # --- AKHIR PERBAIKAN ---
 
     fig = go.Figure()
     color_palette = {'Prophet': '#F59E0B', 'Gradient Boosting': '#10B981', 'Random Forest': '#3B82F6', 'Linear Regression': '#EF4444', 'Holt-Winters': '#8B5CF6', 'ARIMA': '#6366F1'}
 
     fig.add_vrect(x0=latest_year + 0.5, x1=latest_year + 3.5, fillcolor="rgba(230, 230, 230, 0.4)", layer="below", line_width=0, annotation_text="Area Peramalan", annotation_position="top left")
     fig.add_vline(x=latest_year + 0.5, line_width=2, line_dash="dash", line_color="grey")
-    fig.add_trace(go.Scatter(x=hist_years, y=hist_values, mode='lines+markers', name='Data Aktual', line=dict(color='#059669', width=4), marker=dict(size=8)))
+
+    # --- PERBAIKAN KUNCI ---
+    # Plot data aktual menggunakan `historical_data` yang baru saja didefinisikan.
+    fig.add_trace(go.Scatter(x=[int(y) for y in historical_data.index], y=historical_data.values, mode='lines+markers', name='Data Aktual', line=dict(color='#059669', width=4), marker=dict(size=8)))
+    # --- AKHIR PERBAIKAN ---
 
     for model_name in selected_models:
         if model_name not in color_palette or model_name not in historical_fit: continue
@@ -376,6 +390,7 @@ def display_analysis_view(indicator_name, y_label):
     st.markdown("<h4>🔢 Tabel Data Historis & Peramalan</h4>", unsafe_allow_html=True)
     table_df = pd.DataFrame(index=hist_years + future_years)
     table_df.index.name = "Tahun"
+    # Gunakan 'historical_data' yang sudah pasti up-to-date untuk kolom Data Aktual
     table_df['Data Aktual'] = historical_data.reindex([str(y) for y in table_df.index]).values
     for model_name in selected_models:
         fit, forecast = historical_fit.get(model_name), future_forecast.get(model_name)
@@ -396,11 +411,12 @@ def display_analysis_view(indicator_name, y_label):
         else:
             st.warning("Pilih minimal satu model untuk melihat metrik evaluasinya.")
 
+
 # ======================================================================================
 # 7. KONTEN UTAMA (BERDASARKAN NAVIGASI)
 # ======================================================================================
 st.markdown("<h1 style='text-align: center;'>🏛️ Dashboard Analisis & Prediksi Ekonomi-Sosial Kota Batu</h1>", unsafe_allow_html=True)
-st.markdown(f"<p style='text-align: center; color: #A0A0A0; font-size: 1.2em;'>Analisis Komparatif Multi-Model (Data hingga {latest_year}, Prediksi hingga {latest_year + 3})</p>", unsafe_allow_html=True)
+st.markdown(f"<p style='text-align: center; color: #A0A0A0; font-size: 1.2em;'>Analisis Komparatif Multi-Model (Data Historis: {start_year}–{latest_year}, Prediksi: {latest_year + 1}–{latest_year + 3})</p>", unsafe_allow_html=True)
 st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
 
 if page == '🏠 Beranda':
@@ -408,7 +424,7 @@ if page == '🏠 Beranda':
 
     with tab1:
         st.markdown(f"<h2>Ringkasan Kondisi Tahun {latest_year}</h2>", unsafe_allow_html=True)
-        st.write("Halaman ini menampilkan ringkasan kondisi sosial-ekonomi Kota Batu pada tahun terakhir data tersedia. Gunakan navigasi di sidebar untuk melihat analisis prediksi mendalam per indikator.")
+        st.write(f"Halaman ini menampilkan ringkasan kondisi sosial-ekonomi Kota Batu pada tahun terakhir data tersedia ({latest_year}). Gunakan navigasi di sidebar untuk melihat analisis prediksi mendalam per indikator.")
         def get_latest_value(keywords):
             try:
                 full_name = find_indicator_by_keywords(keywords, df_main.index)
@@ -441,26 +457,52 @@ if page == '🏠 Beranda':
         st.markdown("<h5>Format File Excel yang Benar (Sesuai Template):</h5>", unsafe_allow_html=True)
         st.markdown("""
         1.  **Nama Sheet**: Data harus berada di dalam sheet bernama `Sheet1`.
-        2.  **Posisi Header**: Judul kolom (misalnya: No, INDIKATOR, 2010, dst.) harus berada di **baris ke-4**. Tiga baris pertama bisa dikosongkan atau berisi judul/catatan lain.
-        3.  **Kolom Indikator**: Pastikan ada kolom dengan judul `INDIKATOR`.
-        4.  **Kolom Tahun**: Kolom-kolom berikutnya harus berisi data tahunan dengan judul berupa angka tahun (misal: `2010`, `2011`, dst.).
+        2.  **Posisi Header**: Judul kolom (misalnya: No, Rincian, 2010, dst.) harus berada di **baris ke-4**. Tiga baris pertama bisa dikosongkan atau berisi judul/catatan lain.
+        3.  **Kolom Rincian**: Pastikan ada kolom dengan judul `Rincian`.
+        4.  **Kolom Tahun**: Kolom-kolom berikutnya harus berisi data tahunan dengan judul berupa angka tahun (misal: `2021`, `2022`, dst.).
 
-        **Contoh Struktur di Excel:**
+        **Contoh Struktur di Excel (berdasarkan 4 tahun terakhir dari data yang dimuat):**
         """)
         
+        example_years = sorted([str(y) for y in year_cols_int])[-4:]
+        
+        example_indicators = {
+            "PDRB": find_indicator_by_keywords(['pdrb', 'berlaku'], df_main.index),
+            "IPM": IPM,
+            "Kemiskinan": KEMISKINAN
+        }
+
         contoh_data = {
             'No': [1, 2, 3, 4],
-            'INDIKATOR': [
-                'PDRB Atas Dasar Harga Berlaku (Miliar Rp)',
-                'Indeks Pembangunan Manusia (IPM)',
-                'Persentase Penduduk Miskin (%)',
+            'Rincian': [
+                example_indicators["PDRB"] or 'PDRB Atas Dasar Harga Berlaku (Miliar Rp)',
+                example_indicators["IPM"] or 'Indeks Pembangunan Manusia (IPM)',
+                example_indicators["Kemiskinan"] or 'Persentase Penduduk Miskin (%)',
                 '...'
             ],
-            '2021': [14931.71, 77.31, 4.33, '...'],
-            '2022': [15786.87, 78.28, 4.08, '...'],
-            '2023': [16482.52, 78.51, 3.84, '...'],
-            '2024': [16482.52, 79.11, 3.40, '...']
         }
+
+        for year in example_years:
+            row_data = []
+            # Baris 1: PDRB
+            if example_indicators["PDRB"] and year in df_main.columns:
+                row_data.append(f"{df_main.loc[example_indicators['PDRB'], year]:,.2f}")
+            else:
+                row_data.append("...")
+            # Baris 2: IPM
+            if example_indicators["IPM"] and year in df_main.columns:
+                 row_data.append(f"{df_main.loc[example_indicators['IPM'], year]:,.2f}")
+            else:
+                 row_data.append("...")
+            # Baris 3: Kemiskinan
+            if example_indicators["Kemiskinan"] and year in df_main.columns:
+                 row_data.append(f"{df_main.loc[example_indicators['Kemiskinan'], year]:,.2f}")
+            else:
+                 row_data.append("...")
+            # Baris 4: ...
+            row_data.append("...")
+            contoh_data[year] = row_data
+
         df_contoh = pd.DataFrame(contoh_data)
         st.dataframe(df_contoh, hide_index=True, use_container_width=True)
 
@@ -494,4 +536,5 @@ elif page == '🏠 Tingkat Kemiskinan':
 # 8. FOOTER
 # ======================================================================================
 st.markdown("<hr class='section-divider'>", unsafe_allow_html=True)
-st.markdown(f"<div style='text-align: center; color: #A0A0A0; margin-top: 40px;'>Dikembangkan dengan Streamlit & Python | Juli 2025</div>", unsafe_allow_html=True)
+current_month_year = datetime.datetime.now().strftime("%B %Y")
+st.markdown(f"<div style='text-align: center; color: #A0A0A0; margin-top: 40px;'>Dikembangkan dengan Streamlit & Python | {current_month_year}</div>", unsafe_allow_html=True)

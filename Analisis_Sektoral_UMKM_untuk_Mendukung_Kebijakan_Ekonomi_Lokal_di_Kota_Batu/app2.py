@@ -339,7 +339,7 @@ def load_and_process_initial_data(umkm_file_path, geojson_path_desa, geojson_pat
                 return None
             
             gdf_desa = gpd.read_file(geojson_path_desa)
-            gdf_kecamatan = gpd.read_file(geojson_kecamatan_path)
+            gdf_kecamatan = gpd.read_file(geojson_path_kecamatan)
         
     except (FileNotFoundError, ValueError) as e:
         st.error(f"Error memuat data: {e}. Pastikan file UMKM default dan GeoJSON ada di direktori yang benar.")
@@ -481,16 +481,7 @@ def calculate_area_statistics(df_filtered, geojson_data, boundary_level):
 
 def get_pydeck_download_script(filename="pydeck_map.png"):
     script = f"""
-    <div style="margin: 10px 0;">
-        <button id="downloadPydeckBtn" onclick="downloadPydeckMap()" 
-                style="display:inline-block; text-align:center; text-decoration:none; 
-                        color:white; background-color:#17a2b8; padding:10px 20px; 
-                        border-radius:8px; font-weight:bold; border:none; cursor:pointer;">
-            📥 Unduh Peta PyDeck
-        </button>
-        <span id="downloadStatus" style="margin-left: 10px; color: #666;"></span>
-    </div>
-    
+       
     <script>
     function downloadPydeckMap() {{
         const statusEl = document.getElementById('downloadStatus');
@@ -586,7 +577,7 @@ if df is not None:
 
     st.sidebar.markdown("---")
     st.sidebar.header("⬆️ Unggah Data Baru")
-    st.sidebar.info("Untuk panduan format file dan unggah, silakan kunjungi tab 'Panduan Penggunaan' di halaman utama.")
+    st.sidebar.info("Anda bisa mengedit file di spreadsheet dan mengunggahnya. Format angka akan diperbaiki otomatis.")
     
     with st.sidebar.form(key='upload_form'):
         uploaded_file = st.file_uploader("Pilih file CSV atau XLSX", type=["csv", "xlsx"])
@@ -594,17 +585,31 @@ if df is not None:
 
         if submit_button and uploaded_file is not None:
             try:
-                with st.spinner("Membaca file yang diunggah..."):
-                    file_extension = os.path.splitext(uploaded_file.name)[1].lower()
-                    if file_extension == '.csv':
-                        new_df = pd.read_csv(uploaded_file)
-                    elif file_extension == '.xlsx':
-                        new_df = pd.read_excel(uploaded_file)
-                    else:
-                        st.sidebar.error("Format file tidak didukung. Mohon unggah file .csv atau .xlsx.")
-                        st.stop()
+                # --- KODE PERBAIKAN FORMAT ANGKA ---
+                with st.spinner("Membaca dan membersihkan format file..."):
+                    def clean_number_format(value):
+                        if isinstance(value, (int, float)): return value
+                        if not isinstance(value, str): return None
+                        s = value.replace(',', '.')
+                        if s.count('.') > 1:
+                            parts = s.split('.')
+                            s = "".join(parts[:-1]) + '.' + parts[-1]
+                        return s
 
-                st.sidebar.success(f"File '{uploaded_file.name}' berhasil dibaca.")
+                    dtype_map = {'latitude': str, 'longitude': str}
+                    file_extension = os.path.splitext(uploaded_file.name)[1].lower()
+                    
+                    if file_extension == '.csv': new_df = pd.read_csv(uploaded_file, dtype=dtype_map)
+                    elif file_extension == '.xlsx': new_df = pd.read_excel(uploaded_file, dtype=dtype_map)
+                    else: st.sidebar.error("Format file tidak didukung."); st.stop()
+
+                    for col in ['latitude', 'longitude']:
+                        if col in new_df.columns: new_df[col] = new_df[col].apply(clean_number_format)
+                    
+                    new_df['latitude'] = pd.to_numeric(new_df['latitude'], errors='coerce')
+                    new_df['longitude'] = pd.to_numeric(new_df['longitude'], errors='coerce')
+                st.sidebar.success(f"File '{uploaded_file.name}' berhasil dibaca & format angka dibersihkan.")
+                # --- AKHIR PERBAIKAN FORMAT ANGKA ---
 
                 required_cols = ['namausaha', 'kegiatan', 'latitude', 'longitude', 'nama_sektor', 'kec', 'desa'] 
                 if not all(col in new_df.columns for col in required_cols):
@@ -615,10 +620,13 @@ if df is not None:
                     new_df.dropna(subset=['latitude', 'longitude'], inplace=True)
                     new_gdf = gpd.GeoDataFrame(new_df, geometry=gpd.points_from_xy(new_df.longitude, new_df.latitude), crs="EPSG:4326")
                     
-                    gdf_desa_geo = gpd.read_file(geojson_kelurahan_path)
-                    gdf_kecamatan_geo = gpd.read_file(geojson_kecamatan_path)
+                    # --- KODE PERBAIKAN CRS ---
+                    # Menyamakan CRS antara titik dan poligon untuk memastikan join berhasil
+                    gdf_desa_geo = gpd.read_file(geojson_kelurahan_path).to_crs(new_gdf.crs)
+                    gdf_kecamatan_geo = gpd.read_file(geojson_kecamatan_path).to_crs(new_gdf.crs)
+                    # --- AKHIR PERBAIKAN CRS ---
 
-                st.sidebar.success("Data UMKM dasar siap.")
+                st.sidebar.success("Data UMKM dasar siap & CRS peta disamakan.")
 
                 with st.spinner("Melakukan spatial join (pemetaan desa/kecamatan) untuk data baru..."):
                     new_gdf = gpd.sjoin(new_gdf, gdf_desa_geo[['nm_kelurahan', 'geometry']], how="left", predicate='within').drop(columns=['index_right'])
@@ -642,10 +650,14 @@ if df is not None:
                 st.sidebar.success("Jarak ke POI berhasil dihitung.")
 
                 new_gdf = new_gdf.drop(columns=['nm_kelurahan', 'nm_kecamatan', 'kec', 'desa'], errors='ignore')
-                st.session_state['main_data'] = pd.concat([st.session_state['main_data'], new_gdf], ignore_index=True)
                 
-                st.sidebar.success(f"Berhasil mengunggah {len(new_df)} UMKM baru! Data telah diperbarui dan siap dianalisis.")
-                st.sidebar.markdown(to_excel_download_link(st.session_state['main_data'], "umkm_batu_gabungan.xlsx", "📥 Unduh Data Gabungan (Excel)"), unsafe_allow_html=True)
+                st.session_state['main_data'] = new_gdf
+                
+                st.cache_data.clear()
+                st.cache_resource.clear()
+                
+                st.sidebar.success(f"Berhasil MENGGANTIKAN data dengan {len(new_df)} UMKM baru! Data telah diperbarui.")
+                st.sidebar.markdown(to_excel_download_link(st.session_state['main_data'], "umkm_batu_terbaru.xlsx", "📥 Unduh Data Terbaru (Excel)"), unsafe_allow_html=True)
                 
                 st.rerun()
 
@@ -656,14 +668,13 @@ if df is not None:
     with st.sidebar.container(border=True):
         st.markdown("<p style='text-align: center; font-weight: bold;'>Actual Dataset Source</p>", unsafe_allow_html=True)
         try:
-            # Cek apakah file default (umkm_file_path) ada
             if os.path.exists(umkm_file_path):
                 with open(umkm_file_path, "rb") as file:
                     st.download_button(
                         label="📥 Download (.csv)",
                         data=file,
-                        file_name='umkm_batu_clustered.csv', # Nama file asli
-                        mime='text/csv', # Tipe file CSV
+                        file_name='umkm_batu_clustered.csv',
+                        mime='text/csv',
                         use_container_width=True
                     )
             else:
@@ -687,7 +698,7 @@ if df is not None:
         st.markdown("<h4>2. Mengunggah Data UMKM Baru</h4>", unsafe_allow_html=True)
         st.write(
             "Anda dapat memperbarui atau menambahkan data UMKM yang dianalisis dengan mengunggah file CSV atau XLSX baru melalui opsi 'Unggah Data Baru' di sidebar. "
-            "**Penting:** Pastikan format file Anda sesuai dengan panduan di bawah ini."
+            "**Penting:** Saat Anda mengunggah file baru, **seluruh data yang ada saat ini akan digantikan** dengan data dari file tersebut. Pastikan file yang diunggah sudah memuat semua data yang ingin Anda analisis."
         )
 
         st.markdown("<h5>Format File CSV/XLSX yang Benar:</h5>", unsafe_allow_html=True)
@@ -825,7 +836,6 @@ if df is not None:
                 st.pydeck_chart(pdk.Deck(map_style=mapbox_style, initial_view_state=view_state, layers=layers, tooltip={"html": "{tooltip_html}"}))
                 
                 # Download options
-                st.markdown("### 📥 Unduh Peta")
                 col1, col2 = st.columns(2)
                 
                 with col1:

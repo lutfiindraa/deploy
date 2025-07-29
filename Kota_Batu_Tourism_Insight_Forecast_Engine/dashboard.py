@@ -735,13 +735,20 @@ elif page == "🏆 Peramalan per Destinasi":
         st.error("Gagal memuat data destinasi. Tidak dapat menampilkan analisis.")
 
 
-# --- HALAMAN TREN HISTORIS ---
+# --- HALAMAN TREN HISTORIS (REVISI) ---
 elif page == "📈 Tren Historis":
     st.title("📈 Tren Historis Kunjungan Wisatawan")
     if df_total is not None:
         tab1, tab2, tab3 = st.tabs(["📊 Tren Utama", "📅 Analisis Musiman", "🔗 Analisis Dependensi Temporal"])
+        
+        # Ekstrak tahun awal dan akhir dari data
+        start_year = df_total.index.year.min()
+        end_year = df_total.index.year.max()
+        
         with tab1:
-            st.markdown("#### Perkembangan Kunjungan Wisatawan (2022 - 2024)")
+            # Gunakan f-string untuk membuat judul dinamis
+            st.markdown(f"#### Perkembangan Kunjungan Wisatawan ({start_year} - {end_year})")
+            
             st.markdown("Garis ini menunjukkan total kunjungan bulanan. Data yang kosong telah diisi menggunakan metode interpolasi linear untuk menjaga kontinuitas tren.")
             
             fig_line = px.line(df_total.reset_index(), x='index', y='jumlah_wisatawan', markers=True, color_discrete_sequence=['#667eea'], labels={'index': 'Tanggal', 'jumlah_wisatawan': 'Jumlah Wisatawan'})
@@ -750,6 +757,8 @@ elif page == "📈 Tren Historis":
             fig_line.update_traces(line=dict(width=3), marker=dict(size=8), hovertemplate='<b>%{x|%B %Y}</b><br>Wisatawan: %{y:,.0f}<extra></extra>')
             fig_line.update_xaxes(dtick="M1", tickformat="%b\n%Y")
             st.plotly_chart(fig_line, use_container_width=True)
+            st.markdown("Garis ini menunjukkan total kunjungan bulanan. Data yang kosong telah diisi menggunakan metode interpolasi linear untuk menjaga kontinuitas tren.")
+                        
         with tab2:
             st.markdown("#### Validasi Hipotesis 1: Pola Musiman Kunjungan")
             st.markdown("""*Box plot* bulanan ini memvalidasi **Hipotesis 1 (Musiman)** dengan menunjukkan distribusi jumlah wisatawan setiap bulan. Dari plot, kita dapat melihat adanya *high season* (puncak kunjungan) di pertengahan (Juni-Juli) dan akhir tahun (Desember), serta *low season* pada bulan-bulan lainnya.""")
