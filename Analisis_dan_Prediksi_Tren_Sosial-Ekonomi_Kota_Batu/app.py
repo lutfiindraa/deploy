@@ -103,7 +103,8 @@ def load_data(source):
         if file_extension == '.xlsx':
             data = pd.read_excel(source, sheet_name='Sheet1', skiprows=3, engine='openpyxl')
         elif file_extension == '.csv':
-            data = pd.read_csv(source, encoding='utf-8', sep=',', header=0)
+            # Asumsi header ada di baris 4 (indeks 3), jadi kita lewati 3 baris pertama
+            data = pd.read_csv(source, skiprows=4)
         else:
             st.error(f"Format file '{file_extension}' tidak didukung. Mohon unggah file .xlsx atau .csv.")
             return None
@@ -114,37 +115,23 @@ def load_data(source):
 
     # --- Common processing steps ---
     data.columns = [str(col).strip().replace('\n', '') for col in data.columns]
-
+    
+    # Mencari kolom 'Rincian' atau 'Indikator'
     indicator_col_name = None
     for col in data.columns:
-        if 'INDIKATOR' == col.upper() or 'RINCIAN' == col.upper():
+        if 'RINCIAN' in col.upper() or 'INDIKATOR' in col.upper():
             indicator_col_name = col
             break
-    
+            
     if not indicator_col_name:
-        for col in data.columns:
-            if 'TAHUN' == col.upper():
-                if not data[col].dropna().apply(lambda x: str(x).isdigit() and len(str(x)) == 4).all():
-                    indicator_col_name = col
-                    break
-
-    if not indicator_col_name:
-        st.error("Gagal menemukan kolom 'INDIKATOR' di baris header. Pastikan format file Anda sesuai dengan template yang disediakan.")
+        st.error("Gagal menemukan kolom 'Rincian' atau 'Indikator'. Pastikan file Anda memiliki kolom ini.")
         return None
 
     data = data.rename(columns={indicator_col_name: 'Indikator'})
     
-    data.columns = [col.replace(' ', '_') for col in data.columns]
-    
-    if 'Indikator_' in data.columns:
-        data = data.rename(columns={'Indikator_': 'Indikator'})
-
-    if 'No_' in data.columns:
-        data = data.drop(columns=['No_'])
-    
-    if 'TAHUN' in data.columns and data.columns[0] != 'Indikator' and data.columns[1] != 'Indikator':
-        data = data.drop(columns=['TAHUN'])
-
+    # Hapus kolom 'No' dan 'Unnamed' yang tidak perlu
+    cols_to_drop = [col for col in data.columns if 'NO' in col.upper() or 'UNNAMED' in col.upper()]
+    data = data.drop(columns=cols_to_drop)
 
     data.dropna(subset=['Indikator'], inplace=True)
     data['Indikator'] = data['Indikator'].str.strip()
@@ -152,21 +139,20 @@ def load_data(source):
     year_columns = [col for col in data.columns if col.isdigit()]
     
     if not year_columns:
-        st.error("Tidak ada kolom tahun yang terdeteksi. Pastikan nama kolom tahun berupa angka (misal: 2020, 2021) di baris header.")
+        st.error("Tidak ada kolom tahun yang terdeteksi. Pastikan nama kolom tahun berupa angka (misal: 2020, 2021).")
         return None
 
     for col in year_columns:
         data[col] = pd.to_numeric(data[col], errors='coerce')
 
-    valid_year_columns = [col for col in year_columns if col in data.columns]
-    if not valid_year_columns:
-        st.error("Kolom tahun yang valid tidak ditemukan setelah pemrosesan.")
-        return None
-
-    data_transposed = data.set_index('Indikator')[valid_year_columns].transpose()
+    data_transposed = data.set_index('Indikator')[year_columns].transpose()
+    data_transposed.index = data_transposed.index.astype(str)
+    
+    # Interpolasi untuk mengisi data kosong
     data_transposed = data_transposed.interpolate(method='linear', limit_direction='both')
 
     return data_transposed.transpose()
+
 
 # ======================================================================================
 # 4. SIDEBAR & LOGIKA UNGGAH FILE
@@ -185,7 +171,7 @@ with st.sidebar:
     uploaded_file = st.file_uploader(
         "Unggah file data baru (.xlsx)",
         type="xlsx",
-        help="Unggah file Excel dengan format yang sama untuk memperbarui data analisis."
+        help="Gunakan ini untuk mengunggah file data yang sudah Anda perbarui."
     )
 
 data_source = None
@@ -204,7 +190,7 @@ if df_main is None:
     st.stop()
 
 # --- Mendapatkan tahun awal dan akhir secara dinamis ---
-year_cols_int = [int(c) for c in df_main.columns if c.isdigit()]
+year_cols_int = [int(c) for c in df_main.columns if str(c).isdigit()]
 start_year = min(year_cols_int)
 latest_year = max(year_cols_int)
 
@@ -232,19 +218,20 @@ with st.sidebar:
     with st.container(border=True):
         st.markdown("<p style='text-align: center; font-weight: bold;'>Actual Dataset Source</p>", unsafe_allow_html=True)
         try:
-            if os.path.exists(DEFAULT_FILE_PATH):
-                with open(DEFAULT_FILE_PATH, "rb") as file:
-                    st.download_button(
-                        label="📥 Download (.xlsx)",
-                        data=file,
-                        file_name=f'Data Strategis Kota Batu 2010-2024.xlsx',
-                        mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                        use_container_width=True
-                    )
-            else:
-                st.info("File template default tidak ditemukan.", icon="ℹ️")
+            # Gunakan file yang diunggah jika ada, jika tidak, gunakan file default
+            file_to_download = uploaded_file.getvalue() if uploaded_file else open(DEFAULT_FILE_PATH, "rb").read()
+            download_filename = uploaded_file.name if uploaded_file else os.path.basename(DEFAULT_FILE_PATH)
+            
+            st.download_button(
+                label="📥 Download (.xlsx)",
+                data=file_to_download,
+                file_name=download_filename,
+                mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                use_container_width=True
+            )
         except Exception as e:
-            st.error("Gagal memuat template.", icon="🚨")
+            st.error("Gagal memuat file sumber.", icon="🚨")
+
 
     available_models = ['Prophet', 'Gradient Boosting', 'Random Forest', 'Linear Regression', 'Holt-Winters', 'ARIMA']
     selected_models = st.multiselect(
@@ -353,15 +340,8 @@ def display_analysis_view(indicator_name, y_label):
     - **Garis Putus-Putus Berwarna:** Prediksi model untuk masa depan (Forecast).
     """)
 
-    # Panggil fungsi prediksi yang di-cache
     historical_fit, future_forecast, evaluation_metrics, hist_years, future_years = generate_all_predictions(indicator_name, df_main)
-    
-    # --- PERBAIKAN KUNCI ---
-    # Selalu ambil data historis langsung dari df_main saat ini untuk diplot.
-    # Ini untuk memastikan plot "Data Aktual" selalu diperbarui saat file baru diunggah,
-    # menghindari masalah dari data cache.
     historical_data = df_main.loc[indicator_name].dropna()
-    # --- AKHIR PERBAIKAN ---
 
     fig = go.Figure()
     color_palette = {'Prophet': '#F59E0B', 'Gradient Boosting': '#10B981', 'Random Forest': '#3B82F6', 'Linear Regression': '#EF4444', 'Holt-Winters': '#8B5CF6', 'ARIMA': '#6366F1'}
@@ -369,10 +349,7 @@ def display_analysis_view(indicator_name, y_label):
     fig.add_vrect(x0=latest_year + 0.5, x1=latest_year + 3.5, fillcolor="rgba(230, 230, 230, 0.4)", layer="below", line_width=0, annotation_text="Area Peramalan", annotation_position="top left")
     fig.add_vline(x=latest_year + 0.5, line_width=2, line_dash="dash", line_color="grey")
 
-    # --- PERBAIKAN KUNCI ---
-    # Plot data aktual menggunakan `historical_data` yang baru saja didefinisikan.
     fig.add_trace(go.Scatter(x=[int(y) for y in historical_data.index], y=historical_data.values, mode='lines+markers', name='Data Aktual', line=dict(color='#059669', width=4), marker=dict(size=8)))
-    # --- AKHIR PERBAIKAN ---
 
     for model_name in selected_models:
         if model_name not in color_palette or model_name not in historical_fit: continue
@@ -390,7 +367,6 @@ def display_analysis_view(indicator_name, y_label):
     st.markdown("<h4>🔢 Tabel Data Historis & Peramalan</h4>", unsafe_allow_html=True)
     table_df = pd.DataFrame(index=hist_years + future_years)
     table_df.index.name = "Tahun"
-    # Gunakan 'historical_data' yang sudah pasti up-to-date untuk kolom Data Aktual
     table_df['Data Aktual'] = historical_data.reindex([str(y) for y in table_df.index]).values
     for model_name in selected_models:
         fit, forecast = historical_fit.get(model_name), future_forecast.get(model_name)
@@ -406,8 +382,8 @@ def display_analysis_view(indicator_name, y_label):
                 metrics_df_filtered = metrics_df.loc[metrics_df.index.intersection(selected_models)]
                 if not metrics_df_filtered.empty:
                     st.dataframe(metrics_df_filtered.style.format({'MAE': '{:,.2f}', 'RMSE': '{:,.2f}', 'MAPE (%)': '{:.2f}%', 'R-squared': '{:.4f}'}, na_rep="-")
-                                    .highlight_min(subset=['MAE', 'RMSE', 'MAPE (%)'], color="#C9C5DD", axis=0)
-                                    .highlight_max(subset=['R-squared'], color="#C9C5DD", axis=0), use_container_width=True)
+                                .highlight_min(subset=['MAE', 'RMSE', 'MAPE (%)'], color="#C9C5DD", axis=0)
+                                .highlight_max(subset=['R-squared'], color="#C9C5DD", axis=0), use_container_width=True)
         else:
             st.warning("Pilih minimal satu model untuk melihat metrik evaluasinya.")
 
@@ -443,26 +419,25 @@ if page == '🏠 Beranda':
         st.markdown("<h4>Langkah 1: Navigasi Halaman</h4>", unsafe_allow_html=True)
         st.write("Gunakan menu **Navigasi** di sidebar (bilah sisi kiri) untuk berpindah antara halaman analisis yang berbeda, seperti PDRB, Ketenagakerjaan, IPM, dan Tingkat Kemiskinan.")
 
-        st.markdown("<h4>Langkah 2: Mengunggah Data Baru (Opsional)</h4>", unsafe_allow_html=True)
+        # --- REVISI PANDUAN PENGGUNA ---
+        st.markdown("<h4>Langkah 2: Memperbarui Data (Opsional)</h4>", unsafe_allow_html=True)
         st.write(
-            "Anda dapat menganalisis data terbaru dengan mengunggah file Excel Anda sendiri. "
-            "Gunakan tombol **'Unggah file data baru (.xlsx)'** di sidebar. Anda juga dapat mengunduh template format yang benar terlebih dahulu."
+            "Untuk menganalisis data dengan tahun terbaru, Anda dapat mengikuti alur kerja berikut:"
         )
+        st.markdown("""
+        1.  **Unduh Data Sumber**: Di sidebar, pada bagian **'Actual Dataset Source'**, klik tombol **'Download (.xlsx)'**. Ini akan mengunduh file Excel yang saat ini digunakan oleh dashboard.
+        2.  **Perbarui File**: Buka file yang telah diunduh. Tambahkan kolom untuk tahun baru (misalnya, `2025`) dan isikan datanya sesuai dengan format yang ada. Pastikan semua indikator terisi.
+        3.  **Unggah Kembali**: Setelah menyimpan perubahan, kembali ke dashboard dan gunakan tombol **'Unggah file data baru (.xlsx)'** di sidebar untuk mengunggah file yang telah Anda perbarui.
+        
+        Dashboard akan secara otomatis memproses file baru dan memperbarui semua visualisasi dan prediksi.
+        """)
+        # --- AKHIR REVISI ---
         
         st.info(
-            "**Penting:** Semua file Excel yang diunggah harus memiliki format yang sama dengan template, di mana header tabel berada di baris ke-4.",
+            "**Penting:** Pastikan file yang diunggah memiliki format yang sama dengan data sumber, di mana header tabel (Rincian, 2010, 2011, dst.) berada di **baris ke-4**.",
             icon="💡"
         )
-
-        st.markdown("<h5>Format File Excel yang Benar (Sesuai Template):</h5>", unsafe_allow_html=True)
-        st.markdown("""
-        1.  **Nama Sheet**: Data harus berada di dalam sheet bernama `Sheet1`.
-        2.  **Posisi Header**: Judul kolom (misalnya: No, Rincian, 2010, dst.) harus berada di **baris ke-4**. Tiga baris pertama bisa dikosongkan atau berisi judul/catatan lain.
-        3.  **Kolom Rincian**: Pastikan ada kolom dengan judul `Rincian`.
-        4.  **Kolom Tahun**: Kolom-kolom berikutnya harus berisi data tahunan dengan judul berupa angka tahun (misal: `2021`, `2022`, dst.).
-
-        **Contoh Struktur di Excel (berdasarkan 4 tahun terakhir dari data yang dimuat):**
-        """)
+        st.markdown("<h5>Contoh Struktur di Excel (berdasarkan 4 tahun terakhir dari data yang dimuat):</h5>", unsafe_allow_html=True)
         
         example_years = sorted([str(y) for y in year_cols_int])[-4:]
         
@@ -484,22 +459,12 @@ if page == '🏠 Beranda':
 
         for year in example_years:
             row_data = []
-            # Baris 1: PDRB
-            if example_indicators["PDRB"] and year in df_main.columns:
-                row_data.append(f"{df_main.loc[example_indicators['PDRB'], year]:,.2f}")
-            else:
-                row_data.append("...")
-            # Baris 2: IPM
-            if example_indicators["IPM"] and year in df_main.columns:
-                 row_data.append(f"{df_main.loc[example_indicators['IPM'], year]:,.2f}")
-            else:
-                 row_data.append("...")
-            # Baris 3: Kemiskinan
-            if example_indicators["Kemiskinan"] and year in df_main.columns:
-                 row_data.append(f"{df_main.loc[example_indicators['Kemiskinan'], year]:,.2f}")
-            else:
-                 row_data.append("...")
-            # Baris 4: ...
+            for ind_key in ["PDRB", "IPM", "Kemiskinan"]:
+                indicator_name = example_indicators[ind_key]
+                if indicator_name and str(year) in df_main.columns:
+                    row_data.append(f"{df_main.loc[indicator_name, str(year)]:,.2f}")
+                else:
+                    row_data.append("...")
             row_data.append("...")
             contoh_data[year] = row_data
 
