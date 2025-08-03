@@ -8,6 +8,9 @@ import base64
 import os
 import json
 from shapely.geometry import Point, shape
+from sklearn.ensemble import RandomForestRegressor
+from pysal.lib import weights
+from pysal.explore import esda
 from io import BytesIO
 
 # =============================================================================
@@ -260,7 +263,7 @@ st.markdown(
 
 st.title("Dashboard Analitik & Prediktif UMKM Kota Batu")
 st.markdown(
-    "<h2 style='text-align: center;'>Analisis Deskriptif dan Spasial Lokasi UMKM</h2>",
+    "<h2 style='text-align: center;'>Analisis Deskriptif, Spasial, dan Prediktif Lokasi UMKM</h2>",
     unsafe_allow_html=True
 )
 
@@ -366,6 +369,81 @@ def load_and_process_initial_data(umkm_file_path, geojson_path_desa, geojson_pat
 
     return gdf_umkm.drop(columns=['nm_kelurahan', 'nm_kecamatan', 'kec', 'desa'], errors='ignore')
 
+@st.cache_data
+def calculate_hotspots(_gdf_desa, _df_umkm):
+    with st.spinner("Memproses Analisis Hotspot dan Coldspot..."):
+        gdf_desa_copy = _gdf_desa.copy()
+        gdf_desa_copy['nm_kelurahan'] = gdf_desa_copy['nm_kelurahan'].str.title()
+
+        umkm_per_desa = _df_umkm.groupby('nama_desa_akurat').size().reset_index(name='jumlah_umkm')
+        
+        gdf_desa_stats = gdf_desa_copy.merge(umkm_per_desa, left_on='nm_kelurahan', right_on='nama_desa_akurat', how='left')
+        gdf_desa_stats['jumlah_umkm'] = gdf_desa_stats['jumlah_umkm'].astype(float).fillna(0.0) 
+
+        try:
+            w = weights.Queen.from_dataframe(gdf_desa_stats)
+            if w.islands:
+                st.warning("Peringatan: Beberapa desa terputus dari jaringan spasial (tidak memiliki tetangga). Analisis hotspot mungkin tidak akurat untuk area tersebut.")
+        except ValueError as e:
+            st.error(f"Kesalahan dalam menghitung bobot spasial: {e}. Pastikan file GeoJSON memiliki konektivitas spasial yang memadai antar poligon.")
+            return gdf_desa_stats.assign(hotspot_label='Tidak Signifikan')
+
+        w.transform = 'r' 
+
+        if len(gdf_desa_stats) > 1 and gdf_desa_stats['jumlah_umkm'].nunique() > 1:
+            g_local = esda.G_Local(gdf_desa_stats['jumlah_umkm'], w)
+            
+            gdf_desa_stats['hotspot_label'] = 'Tidak Signifikan'
+            gdf_desa_stats.loc[(g_local.Zs > 1.96) & (g_local.p_sim < 0.05), 'hotspot_label'] = 'Hotspot (Sentra Bisnis)'
+            gdf_desa_stats.loc[(g_local.Zs < -1.96) & (g_local.p_sim < 0.05), 'hotspot_label'] = 'Coldspot (Area Sepi)'
+        else:
+            st.info("Tidak cukup variasi data UMKM per desa untuk melakukan analisis hotspot/coldspot yang signifikan.")
+            gdf_desa_stats['hotspot_label'] = 'Tidak Signifikan'
+        
+        return gdf_desa_stats
+
+@st.cache_resource
+def train_suitability_model(_df, sector):
+    df_sector = _df[_df['nama_sektor'] == sector].copy()
+    if len(df_sector) < 10: return None
+
+    with st.spinner(f"Melatih model AI untuk sektor '{sector}'..."):
+        df_sector['success_score'] = 1 / (df_sector['jarak_ke_poi_terdekat_m'] + 1)
+        min_score = df_sector['success_score'].min()
+        max_score = df_sector['success_score'].max()
+        if max_score > min_score:
+            df_sector['success_score'] = (df_sector['success_score'] - min_score) / (max_score - min_score)
+        else:
+            df_sector['success_score'] = 0.5
+        
+        X = df_sector[['latitude', 'longitude', 'jarak_ke_poi_terdekat_m']]
+        y = df_sector['success_score']
+        
+        model = RandomForestRegressor(n_estimators=100, random_state=42, min_samples_leaf=2)
+        model.fit(X, y)
+        return model
+
+@st.cache_data
+def create_prediction_grid(bounds, _poi_data, grid_size=75):
+    with st.spinner("Membuat grid prediksi..."):
+        lon_min, lat_min, lon_max, lat_max = bounds
+        lons = np.linspace(lon_min, lon_max, grid_size)
+        lats = np.linspace(lat_min, lat_max, grid_size)
+        grid_lons, grid_lats = np.meshgrid(lons, lats)
+        
+        grid_df = pd.DataFrame({'longitude': grid_lons.ravel(), 'latitude': grid_lats.ravel()})
+        gdf_grid = gpd.GeoDataFrame(grid_df, geometry=gpd.points_from_xy(grid_df.longitude, grid_df.latitude), crs="EPSG:4326")
+
+        gdf_poi = gpd.GeoDataFrame(geometry=[v for k, v in _poi_data.items()], crs="EPSG:4326")
+        gdf_grid_proj = gdf_grid.to_crs("EPSG:32749")
+        gdf_poi_proj = gdf_poi.to_crs("EPSG:32749")
+
+        gdf_grid['jarak_ke_poi_terdekat_m'] = gdf_grid_proj.geometry.apply(
+            lambda point: gdf_poi_proj.distance(point).min()
+        )
+            
+        return gdf_grid
+
 def calculate_area_statistics(df_filtered, geojson_data, boundary_level):
     if not geojson_data or df_filtered.empty: return geojson_data
     result_geojson = json.loads(json.dumps(geojson_data))
@@ -403,7 +481,7 @@ def calculate_area_statistics(df_filtered, geojson_data, boundary_level):
 
 def get_pydeck_download_script(filename="pydeck_map.png"):
     script = f"""
-        
+       
     <script>
     function downloadPydeckMap() {{
         const statusEl = document.getElementById('downloadStatus');
@@ -600,14 +678,14 @@ if df is not None:
                         use_container_width=True
                     )
             else:
-               st.info("File template default tidak ditemukan.", icon="ℹ️")
+                 st.info("File template default tidak ditemukan.", icon="ℹ️")
         except Exception as e:
             st.error("Gagal memuat template.", icon="🚨")
     # --- AKHIR KARTU ---
 
     # Define Tabs
-    tab_list = ["📖 Panduan Penggunaan", "📊 Ringkasan Umum", "🗺️ Peta Interaktif"] 
-    tab_guide, tab_summary, tab_map = st.tabs(tab_list)
+    tab_list = ["📖 Panduan Penggunaan", "📊 Ringkasan Umum", "🗺️ Peta Interaktif", "🔒 Analisis Lanjutan & AI"] 
+    tab_guide, tab_summary, tab_map, tab_ai = st.tabs(tab_list)
 
     # === TAB: Panduan Penggunaan ===
     with tab_guide:
@@ -615,7 +693,7 @@ if df is not None:
         st.write("Selamat datang di Dashboard Analitik & Prediktif UMKM Kota Batu! Dashboard ini dirancang untuk membantu Anda memahami persebaran, karakteristik, dan potensi lokasi UMKM di Kota Batu. Berikut adalah panduan singkat untuk menggunakannya:")
 
         st.markdown("<h4>1. Navigasi Dashboard</h4>", unsafe_allow_html=True)
-        st.write("Gunakan tab di bagian atas halaman (`Ringkasan Umum`, `Peta Interaktif`) untuk beralih antara berbagai bagian analisis. Sidebar di sebelah kiri digunakan untuk filter data dan pengaturan tampilan.")
+        st.write("Gunakan tab di bagian atas halaman (`Ringkasan Umum`, `Peta Interaktif`, `Analisis Lanjutan & AI`) untuk beralih antara berbagai bagian analisis. Sidebar di sebelah kiri digunakan untuk filter data dan pengaturan tampilan.")
 
         st.markdown("<h4>2. Mengunggah Data UMKM Baru</h4>", unsafe_allow_html=True)
         st.write(
@@ -655,6 +733,8 @@ if df is not None:
         st.markdown("<h4>4. Analisis Berbagai Tab</h4>", unsafe_allow_html=True)
         st.markdown("-   **Ringkasan Umum**: Melihat jumlah total UMKM, sektor usaha teratas, dan grafik distribusi sektor.")
         st.markdown("-   **Peta Interaktif**: Menjelajahi persebaran UMKM di peta. Anda bisa mengunduh peta dengan tombol di bawah peta PyDeck atau menggunakan ikon kamera di Plotly.")
+        st.markdown("-   **Analisis Lanjutan & AI**: Untuk analisis hotspot/coldspot spasial dan rekomendasi lokasi optimal dengan model AI. Tab ini dilindungi kata sandi.")
+        st.info("Kata sandi untuk tab Analisis Lanjutan & AI adalah `password`.")
 
     # === TAB: Ringkasan Umum ===
     with tab_summary:
@@ -716,7 +796,7 @@ if df is not None:
             st.markdown(get_table_download_link(df_filtered, "umkm_terfilter.csv", "📥 Unduh CSV Data Terfilter"), unsafe_allow_html=True)
             display_cols = ['namausaha', 'nama_sektor', 'desa_display', 'kecamatan_display', 'jarak_ke_poi_terdekat_m']
             st.dataframe(df_filtered[display_cols], use_container_width=True, height=400,
-                         column_config={"jarak_ke_poi_terdekat_m": st.column_config.NumberColumn("Jarak ke Wisata (m)", format="%d m")})
+                        column_config={"jarak_ke_poi_terdekat_m": st.column_config.NumberColumn("Jarak ke Wisata (m)", format="%d m")})
 
     # === TAB: Peta Interaktif ===
     with tab_map:
@@ -816,6 +896,116 @@ if df is not None:
             st.plotly_chart(fig_choro, use_container_width=True)
         else:
             st.warning("Tidak ada data untuk membuat peta kepadatan.")
+
+    # === TAB: Analisis Lanjutan & AI (Locked) ===
+    with tab_ai:
+        if not st.session_state['authenticated']:
+            st.warning("Tab ini dilindungi kata sandi. Silakan masukkan kata sandi untuk mengakses.")
+            password_input = st.text_input("Kata Sandi:", type="password")
+            if password_input == "password": # Desired password
+                st.session_state['authenticated'] = True
+                st.success("Akses diberikan! Silakan refresh halaman atau ubah tab untuk melihat konten.")
+                st.rerun() # Refresh to display tab content
+            elif password_input != "": # If user entered an incorrect password
+                st.error("Kata sandi salah.")
+        else:
+            st.header("🔬 Analisis Spasial Statistik: Hotspot & Coldspot")
+            st.info("""
+            Analisis Hotspot dan Coldspot menggunakan metode statistik spasial **Getis-Ord Gi\*** untuk mengidentifikasi area di mana UMKM terkonsentrasi secara signifikan (Hotspot) atau jarang ditemukan (Coldspot). Ini membantu memahami pola spasial yang tidak terlihat hanya dari peta kepadatan biasa.
+            
+            **Bagaimana Cara Kerjanya?**
+            Metode ini membandingkan jumlah UMKM di suatu desa dengan jumlah UMKM di desa-desa tetangganya. Jika suatu desa memiliki banyak UMKM dan dikelilingi oleh desa-desa yang juga memiliki banyak UMKM, maka desa tersebut berpotensi menjadi 'Hotspot'. Sebaliknya, jika suatu desa memiliki sedikit UMKM dan dikelilingi oleh desa-desa dengan sedikit UMKM, desa tersebut berpotensi menjadi 'Coldspot'.
+            
+            **Metrik Statistik:**
+            -   **Z-score**: Mengukur berapa standar deviasi nilai suatu fitur dari rata-rata. Z-score positif yang besar menunjukkan pengelompokan nilai tinggi (hotspot), sedangkan Z-score negatif yang kecil menunjukkan pengelompokan nilai rendah (coldspot).
+            -   **Pseudo P-value (simulasi)**: Mengestimasi probabilitas bahwa pola spasial yang diamati terjadi secara acak. Nilai P-value yang kecil (misalnya, kurang dari 0.05) menunjukkan bahwa pengelompokan tersebut signifikan secara statistik, bukan karena kebetulan.
+            """)
+
+            with st.expander("❓ Memahami Hasil Getis-Ord Gi*: Kenapa 'Tidak Signifikan'?"):
+                st.markdown("""
+                Jika sebagian besar atau seluruh area diklasifikasikan sebagai **"Tidak Signifikan"**, ini adalah hasil analisis statistik yang normal dan bukan berarti ada kesalahan dalam perhitungan. Ini dapat terjadi karena beberapa alasan:
+                
+                1.  **Distribusi UMKM Cenderung Acak atau Merata**: Artinya, jumlah UMKM di setiap desa tidak terkonsentrasi secara ekstrem pada satu area dan juga tidak terlalu jarang di area lain secara signifikan. Pola persebaran UMKM di Kota Batu mungkin memang cenderung merata.
+                2.  **Variasi Data yang Kurang Signifikan**: Jika perbedaan jumlah UMKM antar desa tidak terlalu besar atau menonjol secara statistik, maka algoritma tidak akan menemukan pengelompokan yang "signifikan" (yaitu, sangat tidak mungkin terjadi secara kebetulan).
+                3.  **Keterbatasan Data**: Dengan data UMKM saat ini, mungkin tidak ada pola spasial yang cukup kuat untuk memenuhi ambang batas signifikansi statistik yang ketat (Z-score dan p-value).
+                
+                **Implikasi "Tidak Signifikan":**
+                Ini berarti tidak ada *bukti statistik yang kuat* untuk menyatakan bahwa ada "kantong" Hotspot atau Coldspot UMKM yang jelas pada tingkat kepercayaan 95%. Dalam konteks kebijakan, ini bisa berarti bahwa upaya pengembangan UMKM mungkin tidak perlu difokuskan pada area-area spesifik berdasarkan kepadatan saja, melainkan pada faktor-faktor lain atau strategi yang lebih merata.
+                """)
+            
+            gdf_desa_geojson = gpd.read_file(geojson_kelurahan_path)
+            gdf_desa_hotspot = calculate_hotspots(gdf_desa_geojson, st.session_state['main_data'])
+            
+            # Hotspot Map (Choropleth)
+            color_discrete_map = {
+                'Hotspot (Sentra Bisnis)': 'red',
+                'Coldspot (Area Sepi)': 'blue',
+                'Tidak Signifikan': 'grey'
+            }
+            fig_hotspot = px.choropleth_mapbox(
+                gdf_desa_hotspot, geojson=gdf_desa_hotspot.geometry, locations=gdf_desa_hotspot.index,
+                color='hotspot_label', color_discrete_map=color_discrete_map,
+                category_orders={'hotspot_label': ['Hotspot (Sentra Bisnis)', 'Coldspot (Area Sepi)', 'Tidak Signifikan']},
+                mapbox_style="carto-positron" if map_theme == "Terang" else "carto-darkmatter",
+                center={"lat": -7.87, "lon": 112.52}, zoom=10.5,
+                hover_name='nm_kelurahan', opacity=0.6,
+                hover_data={'jumlah_umkm': True}
+            )
+            fig_hotspot.update_layout(margin={"r":0,"t":0,"l":0,"b":0}, legend_title_text='Klasifikasi Area', height=600)
+            st.plotly_chart(fig_hotspot, use_container_width=True)
+
+            st.markdown("---")
+            
+            st.header("🤖 Rekomendasi Lokasi Optimal (AI)")
+            st.info("""
+            Model AI ini membantu memprediksi seberapa "layak" atau "potensial" suatu lokasi baru untuk UMKM berdasarkan pola lokasi UMKM sejenis yang sudah ada dan jaraknya ke Poin of Interest (POI) wisata.
+            
+            **Bagaimana Cara Kerjanya?**
+            1.  **Pembelajaran dari Data Eksisting**: Model ini (Random Forest Regressor) dilatih menggunakan data UMKM yang sudah ada. Ia mempelajari hubungan antara lokasi (latitude, longitude), jarak ke POI wisata, dengan 'skor kelayakan' simulasi dari UMKM yang sudah ada.
+            2.  **Skor Kelayakan Simulasi**: Karena data kinerja bisnis riil (misalnya, omset atau jumlah pelanggan) tidak tersedia, kami membuat 'skor kelayakan' simulasi. Skor ini dihitung berdasarkan seberapa dekat UMKM dengan POI wisata utama (semakin dekat, semakin tinggi skornya, dan kemudian dinormalisasi antara 0-1). Ini adalah **representasi yang disederhanakan** dari potensi sukses, dan dalam aplikasi nyata, data kinerja bisnis akan sangat meningkatkan akurasi model.
+            3.  **Prediksi pada Grid**: Setelah dilatih, model memprediksi skor kelayakan untuk ribuan titik lokasi potensial di seluruh Kota Batu (dalam bentuk grid).
+            
+            **Metrik Data Science:**
+            -   **Random Forest Regressor**: Ini adalah algoritma Machine Learning yang robust, sering digunakan untuk prediksi. Ia bekerja dengan membangun banyak "pohon keputusan" dan menggabungkan hasilnya untuk prediksi yang lebih akurat.
+            -   **Skor Kelayakan (Suitability Score)**: Output model, menunjukkan potensi lokasi. Semakin tinggi skornya (mendekati 1), semakin tinggi potensi kelayakannya berdasarkan pola yang dipelajari.
+            
+            **Implikasi:**
+            -   Membantu calon pelaku UMKM dalam menentukan lokasi strategis.
+            -   Memberikan informasi bagi pemerintah daerah untuk merencanakan pengembangan UMKM di area yang berpotensi tinggi.
+            -   **Penting**: Model ini adalah alat pendukung keputusan. Keputusan akhir harus mempertimbangkan faktor-faktor lain seperti demografi, persaingan lokal, peraturan, dan ketersediaan sumber daya.
+            """)
+
+            selected_sector_ai = st.selectbox("Pilih Sektor Usaha untuk Analisis AI:", options=sektor_list)
+
+            if selected_sector_ai:
+                model = train_suitability_model(st.session_state['main_data'], selected_sector_ai)
+                if model:
+                    with st.spinner(f"Menganalisis dan membuat peta prediksi untuk '{selected_sector_ai}'..."):
+                        bounds = st.session_state['main_data'].total_bounds
+                        grid_df = create_prediction_grid(bounds, _poi_data=POI_WISATA)
+                        
+                        features_for_prediction = grid_df[['latitude', 'longitude', 'jarak_ke_poi_terdekat_m']]
+                        grid_df['suitability_score'] = model.predict(features_for_prediction)
+
+                        view_state = pdk.ViewState(latitude=-7.87, longitude=112.52, zoom=11, pitch=50)
+                        heatmap_layer = pdk.Layer(
+                            'HeatmapLayer',
+                            data=grid_df,
+                            get_position='[longitude, latitude]',
+                            get_weight='suitability_score',
+                            opacity=0.5,
+                            pickable=True,
+                            aggregation='"MEAN"'
+                        )
+                        st.pydeck_chart(pdk.Deck(
+                            map_style="mapbox://styles/mapbox/light-v9" if map_theme == "Terang" else "mapbox://styles/mapbox/dark-v9",
+                            initial_view_state=view_state,
+                            layers=[heatmap_layer],
+                            tooltip={"text": "Skor Potensi: {suitability_score:.2f}"}
+                        ))
+                        st.success(f"Peta potensi untuk sektor '{selected_sector_ai}' berhasil dibuat. Area dengan warna lebih 'panas' (merah/kuning) menunjukkan potensi yang lebih tinggi.")
+                else:
+                    st.warning(f"Tidak cukup data untuk sektor '{selected_sector_ai}' untuk membangun model AI yang andal. Diperlukan setidaknya 10 data UMKM untuk sektor ini.")
 
 else:
     st.error("Gagal memuat data utama. Pastikan file CSV dan GeoJSON ada di direktori yang benar.")
