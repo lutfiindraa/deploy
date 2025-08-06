@@ -402,7 +402,7 @@ with st.sidebar:
     # --- FITUR BARU: UI UNDUH TEMPLATE YANG LEBIH BAIK ---
     st.markdown("")
     with st.container(border=True):
-        st.markdown("<h5 style='text-align: center;'>Actual Dataset Source</h5>", unsafe_allow_html=True)        
+        st.markdown("<h5 style='text-align: center;'>Actual Dataset Source</h5>", unsafe_allow_html=True)       
         try:
             # Menggunakan __file__ untuk mendapatkan path direktori skrip
             script_dir = Path(__file__).parent
@@ -413,7 +413,7 @@ with st.sidebar:
                     st.download_button(
                         label="📥 Download (.xlsx)",
                         data=file,
-                        file_name="DDA2025_DinasPariwisata_Template.xlsx",
+                        file_name="wisata3579.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True
                     )
@@ -440,7 +440,8 @@ if page == "🏙️ Insight Kota Batu & Peramalan":
     
     if dynamic_metrics and 'yearly_insights' in dynamic_metrics:
         yearly_insights = dynamic_metrics.get('yearly_insights', {})
-        years = sorted(yearly_insights.keys())
+        # [MODIFIKASI] Urutkan tahun dari terbaru ke terlama
+        years = sorted(yearly_insights.keys(), reverse=True)
         
         if years:
             tabs = st.tabs([f"📈 Insight Tahun {int(year)}" for year in years])
@@ -539,7 +540,8 @@ if page == "🏙️ Insight Kota Batu & Peramalan":
         st.markdown("Tabel di bawah ini menampilkan data per destinasi, dipisahkan per tahun.")
 
         if df_full is not None and not df_full.empty:
-            years_aktual = sorted(df_full['tahun'].unique())
+            # [MODIFIKASI] Urutkan tahun dari terbaru ke terlama
+            years_aktual = sorted(df_full['tahun'].unique(), reverse=True)
             tabs_aktual = st.tabs([f"📄 Data Tahun {int(year)}" for year in years_aktual])
             
             months_order = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']
@@ -758,7 +760,7 @@ elif page == "📈 Tren Historis":
             fig_line.update_xaxes(dtick="M1", tickformat="%b\n%Y")
             st.plotly_chart(fig_line, use_container_width=True)
             st.markdown("Garis ini menunjukkan total kunjungan bulanan. Data yang kosong telah diisi menggunakan metode interpolasi linear untuk menjaga kontinuitas tren.")
-                        
+                                
         with tab2:
             st.markdown("#### Validasi Hipotesis 1: Pola Musiman Kunjungan")
             st.markdown("""*Box plot* bulanan ini memvalidasi **Hipotesis 1 (Musiman)** dengan menunjukkan distribusi jumlah wisatawan setiap bulan. Dari plot, kita dapat melihat adanya *high season* (puncak kunjungan) di pertengahan (Juni-Juli) dan akhir tahun (Desember), serta *low season* pada bulan-bulan lainnya.""")

@@ -220,12 +220,11 @@ with st.sidebar:
         try:
             # Gunakan file yang diunggah jika ada, jika tidak, gunakan file default
             file_to_download = uploaded_file.getvalue() if uploaded_file else open(DEFAULT_FILE_PATH, "rb").read()
-            download_filename = uploaded_file.name if uploaded_file else os.path.basename(DEFAULT_FILE_PATH)
             
             st.download_button(
                 label="📥 Download (.xlsx)",
                 data=file_to_download,
-                file_name=download_filename,
+                file_name="sosco3579.xlsx",
                 mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 use_container_width=True
             )
@@ -382,8 +381,8 @@ def display_analysis_view(indicator_name, y_label):
                 metrics_df_filtered = metrics_df.loc[metrics_df.index.intersection(selected_models)]
                 if not metrics_df_filtered.empty:
                     st.dataframe(metrics_df_filtered.style.format({'MAE': '{:,.2f}', 'RMSE': '{:,.2f}', 'MAPE (%)': '{:.2f}%', 'R-squared': '{:.4f}'}, na_rep="-")
-                                .highlight_min(subset=['MAE', 'RMSE', 'MAPE (%)'], color="#C9C5DD", axis=0)
-                                .highlight_max(subset=['R-squared'], color="#C9C5DD", axis=0), use_container_width=True)
+                                    .highlight_min(subset=['MAE', 'RMSE', 'MAPE (%)'], color="#C9C5DD", axis=0)
+                                    .highlight_max(subset=['R-squared'], color="#C9C5DD", axis=0), use_container_width=True)
         else:
             st.warning("Pilih minimal satu model untuk melihat metrik evaluasinya.")
 

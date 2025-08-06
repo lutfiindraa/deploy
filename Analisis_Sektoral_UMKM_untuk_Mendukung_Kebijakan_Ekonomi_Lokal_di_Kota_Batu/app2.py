@@ -595,7 +595,7 @@ if df is not None:
                     st.download_button(
                         label="📥 Download (.csv)",
                         data=file,
-                        file_name='umkm_batu_clustered.csv',
+                        file_name='umkm3579.csv',
                         mime='text/csv',
                         use_container_width=True
                     )
